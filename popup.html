@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Autofill</title>
+    <style>
+        body { width: 200px; padding: 15px; font-family: sans-serif; }
+        button { 
+            width: 100%; 
+            padding: 10px; 
+            background: #4285f4; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        button:hover { background: #357ae8; }
+        p { font-size: 12px; color: #666; text-align: center; }
+    </style>
+</head>
+<body>
+    <button id="autofill-all">Auto Fill Form</button>
+    <p>Automatically detects and fills all matching fields on this page.</p>
+    <p style="font-size: 11px; color: #888;">Shortcut: Cmd+Shift+F (Mac) / Ctrl+Shift+F</p>
+    <p style="font-size: 10px; color: #999;">Not working? <a href="#" id="set-shortcut" style="color: #4285f4;">Assign shortcut</a></p>
+    <div style="text-align: center; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px;">
+        <a href="#" id="open-settings" style="font-size: 12px; color: #4285f4; text-decoration: none;">Settings</a>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

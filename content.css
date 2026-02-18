@@ -1,0 +1,45 @@
+/* Styles for content.js injected UI */
+.autofill-extension-icon {
+    vertical-align: middle;
+}
+
+.autofill-extension-container {
+    /* Use display: flex or inline-flex for better alignment of icon and input */
+    display: inline-flex;
+    align-items: center; /* Vertically align items */
+    margin-left: 5px; /* Space from the input field */
+    position: relative; /* For dropdown absolute positioning */
+}
+
+/* Custom dropdown div styles */
+.autofill-extension-dropdown {
+    position: absolute;
+    top: 100%; /* Position below the icon/input */
+    left: 0;
+    /* width: auto; Adjust width based on content */
+    min-width: 150px; /* Minimum width */
+    max-width: 300px; /* Maximum width */
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    z-index: 10000;
+    padding: 5px 0; /* Add vertical padding */
+    box-sizing: border-box;
+    display: none; /* Hidden by default */
+    text-align: left; /* Ensure text aligns left */
+}
+
+.autofill-suggestion-item {
+    display: block; /* Each suggestion on a new line */
+    padding: 5px 10px;
+    cursor: pointer;
+    white-space: nowrap; /* Prevent text wrapping */
+    overflow: hidden;
+    text-overflow: ellipsis; /* Add ellipsis for overflowed text */
+    color: #333; /* Default text color */
+}
+
+.autofill-suggestion-item:hover {
+    background-color: #f0f0f0; /* Highlight on hover */
+}

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Intelligent Autofill Settings</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+<body>
+    <h1>Intelligent Autofill Settings</h1>
+
+    <section id="api-key-settings">
+        <h2>Groq API Key</h2>
+        <label for="groq-api-key">API Key:</label>
+        <input type="password" id="groq-api-key" placeholder="gsk_..." size="50">
+        <button id="save-api-key">Save API Key</button>
+        <p id="api-key-status"></p>
+    </section>
+
+    <section id="autofill-settings">
+        <h2>Autofill Fields Configuration</h2>
+        <div id="fields-container">
+            <!-- Dynamically added fields will go here -->
+        </div>
+        <button id="add-field">Add New Field</button>
+        <button id="save-autofill-fields">Save Autofill Fields</button>
+        <p id="autofill-fields-status"></p>
+    </section>
+
+    <section id="resume-settings">
+        <h2>Resume JSON (Used For LLM Context)</h2>
+        <label for="resume-json">Resume JSON:</label>
+        <textarea id="resume-json" rows="14" placeholder="Paste resume JSON here"></textarea>
+    </section>
+
+    <script src="options.js"></script>
+</body>
+</html>
