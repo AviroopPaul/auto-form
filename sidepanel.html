@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Autofill Studio</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <div class="panel">
+    <header class="hero">
+      <div class="hero-mark">
+        <img src="icons/icon48.png" alt="Autofill Studio icon">
+      </div>
+      <div>
+        <h1>Autofill Studio</h1>
+        <p>One-click form completion, tuned to your resume.</p>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab is-active" data-view="autofill">Autofill</button>
+      <button class="tab" data-view="settings">Settings</button>
+    </nav>
+
+    <section class="view is-visible" data-view="autofill">
+      <section class="action-card">
+        <div class="status">
+          <div class="status-dot"></div>
+          <div>
+            <div class="status-title" id="status-title">Ready to fill</div>
+            <div class="status-meta" id="status-meta">Waiting for your command</div>
+          </div>
+        </div>
+        <button id="autofill-trigger" class="primary">Auto Fill This Page</button>
+        <div class="hint">Keep this panel open while it fills the form.</div>
+      </section>
+    </section>
+
+    <section class="view" data-view="settings">
+      <section class="card">
+        <div class="card-header">
+          <h2>Resume Intake</h2>
+          <span class="tag">Auto-parsed</span>
+        </div>
+        <p class="card-copy">Upload a resume anytime. We extract structured fields and keep them ready for the next form.</p>
+        <div class="upload">
+          <input type="file" id="resume-file" accept=".txt,.md,.json,.rtf" />
+          <label for="resume-file">Drop a resume or browse</label>
+        </div>
+        <textarea id="resume-text" rows="8" placeholder="Or paste resume text here..."></textarea>
+        <div class="row">
+          <button id="parse-resume" class="ghost">Extract Fields</button>
+          <div class="autosave" id="resume-status">Idle</div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Manual Fields</h2>
+          <span class="tag">Autosave</span>
+        </div>
+        <div id="fields-container" class="fields"></div>
+        <button id="add-field" class="ghost">Add Field</button>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>API Key</h2>
+          <span class="tag">Groq</span>
+        </div>
+        <input type="password" id="groq-api-key" placeholder="gsk_..." />
+        <div class="autosave" id="api-status">Not saved</div>
+      </section>
+    </section>
+  </div>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>

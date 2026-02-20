@@ -1,0 +1,341 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Manrope:wght@400;600;700&display=swap");
+
+:root {
+  color-scheme: light;
+  --ink: #111827;
+  --ink-soft: #374151;
+  --muted: #6b7280;
+  --accent: #0f766e;
+  --accent-strong: #115e59;
+  --glow: rgba(15, 118, 110, 0.2);
+  --paper: #fdfbf7;
+  --paper-2: #fff7ed;
+  --border: rgba(15, 23, 42, 0.12);
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top, rgba(14, 116, 144, 0.12), transparent 40%),
+    radial-gradient(circle at 10% 20%, rgba(251, 191, 36, 0.16), transparent 45%),
+    var(--paper);
+  color: var(--ink);
+  font-family: "Manrope", "Helvetica Neue", sans-serif;
+}
+
+.panel {
+  padding: 20px 18px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 16px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.tab {
+  flex: 1;
+  border: none;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-weight: 600;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tab.is-active {
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent-strong);
+  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.2);
+}
+
+.view {
+  display: none;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.view.is-visible {
+  display: flex;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.hero-mark {
+  height: 52px;
+  width: 52px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #111827, #1f2937);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 12px 20px rgba(17, 24, 39, 0.3);
+}
+
+.hero-mark img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.25));
+}
+
+.hero h1 {
+  font-family: "Fraunces", "Times New Roman", serif;
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.action-card {
+  border-radius: 18px;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.9));
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.status {
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.status-dot {
+  height: 10px;
+  width: 10px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.2);
+}
+
+.status-title {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.status-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.status.running .status-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 8px var(--glow);
+  animation: pulse 1.4s infinite ease-in-out;
+}
+
+.status.done .status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.2);
+}
+
+.status.error .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.2);
+}
+
+.primary {
+  border: none;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #0f766e, #0d9488);
+  color: #ecfeff;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 14px 26px rgba(15, 118, 110, 0.25);
+}
+
+.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 30px rgba(15, 118, 110, 0.3);
+}
+
+.primary:disabled {
+  cursor: progress;
+  opacity: 0.8;
+  transform: none;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 18px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card-header h2 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.tag {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.card-copy {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.upload {
+  position: relative;
+  border: 1px dashed rgba(15, 118, 110, 0.4);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+  background: rgba(15, 118, 110, 0.05);
+}
+
+.upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.upload label {
+  font-size: 12px;
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+textarea,
+input[type="password"],
+input[type="text"] {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  font-family: "Manrope", "Helvetica Neue", sans-serif;
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ghost {
+  border: 1px solid rgba(15, 118, 110, 0.4);
+  background: transparent;
+  color: var(--accent-strong);
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.field-item {
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  background: rgba(248, 250, 252, 0.8);
+  display: grid;
+  gap: 6px;
+}
+
+.field-item input,
+.field-item textarea {
+  width: 100%;
+}
+
+.field-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.remove {
+  border: none;
+  background: transparent;
+  color: #ef4444;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.autosave {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+}

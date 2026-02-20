@@ -129,6 +129,96 @@ function buildAutofillFieldsFromResume(resume) {
   return fields;
 }
 
+async function parseResumeTextToJson(resumeText, groqApiKey) {
+  const prompt = `Convert the following resume text into a clean, structured JSON object.
+
+Rules:
+- Only use information present in the resume.
+- Use this schema and omit fields you cannot infer:
+{
+  "name": "",
+  "email": "",
+  "phone": "",
+  "website": "",
+  "github": "",
+  "location": "",
+  "experience": [
+    {
+      "company": "",
+      "location": "",
+      "title": "",
+      "startDate": "",
+      "endDate": "",
+      "highlights": []
+    }
+  ],
+  "projects": [
+    { "name": "", "description": "" }
+  ],
+  "education": [
+    {
+      "school": "",
+      "location": "",
+      "degree": "",
+      "gpa": "",
+      "startDate": "",
+      "endDate": ""
+    }
+  ],
+  "skills": {
+    "languages": [],
+    "backend_ai": [],
+    "frontend": [],
+    "data_infra": []
+  }
+}
+
+Resume text:
+${resumeText}`;
+
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${groqApiKey}`
+    },
+    body: JSON.stringify({
+      model: "openai/gpt-oss-120b",
+      messages: [
+        { role: "system", content: "You convert resume text into strict JSON following the given schema." },
+        { role: "user", content: prompt }
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.1
+    })
+  });
+
+  if (!response.ok) {
+    let errorBody = "";
+    try {
+      const errorData = await response.json();
+      errorBody = errorData?.error?.message || JSON.stringify(errorData);
+    } catch (_) {
+      try {
+        errorBody = (await response.text()).slice(0, 200);
+      } catch (_) {
+        errorBody = "";
+      }
+    }
+    const statusLine = `${response.status} ${response.statusText}`.trim();
+    throw new Error(`Groq API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
+  }
+
+  const data = await response.json();
+  let parsed = {};
+  try {
+    parsed = JSON.parse(data.choices[0].message.content);
+  } catch (_) {
+    parsed = {};
+  }
+  return parsed;
+}
+
 // Listen for messages from content scripts or options page
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === "deduceFormFields") {
@@ -393,6 +483,35 @@ Outer HTML: ${htmlContext.html}`;
       chrome.runtime.openOptionsPage();
       sendResponse({ success: true });
       return true;
+    } else if (request.action === "parseResume") {
+      const resumeText = request.resumeText || "";
+      if (!resumeText.trim()) {
+        sendResponse({ error: "Resume text is empty." });
+        return true;
+      }
+      chrome.storage.sync.get("settings", async (data) => {
+        try {
+          const settings = data.settings || {};
+          const groqApiKey = settings.groqApiKey || settings.openaiApiKey;
+          if (!groqApiKey) {
+            sendResponse({ error: "API Key not set" });
+            return;
+          }
+          if (groqApiKey.startsWith("sk-") && !groqApiKey.startsWith("gsk_")) {
+            sendResponse({ error: "Invalid API key format. Use your Groq API key (typically starts with gsk_)." });
+            return;
+          }
+
+          const parsedResume = await parseResumeTextToJson(resumeText, groqApiKey);
+          const resumeJson = JSON.stringify(parsedResume, null, 2);
+          const autofillFields = buildAutofillFieldsFromResume(parsedResume);
+          sendResponse({ resumeJson, autofillFields });
+        } catch (error) {
+          console.error("Error parsing resume:", error);
+          sendResponse({ error: `Error: ${error.message}` });
+        }
+      });
+      return true;
     } else if (request.action === "trigger_autofill") {
       const tabId = request.tabId;
       if (!tabId) {
@@ -406,8 +525,16 @@ Outer HTML: ${htmlContext.html}`;
   });
 
 // Listen for clicks on the extension icon
-chrome.action.onClicked.addListener(() => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("options.html") });
+if (chrome.sidePanel?.setPanelBehavior) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  if (chrome.sidePanel?.open && tab?.id) {
+    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+    return;
+  }
+  chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") });
 });
 
 // Keyboard shortcut for autofill (keeps modal focused - no popup to steal focus)
