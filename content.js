@@ -1,6 +1,48 @@
 // content.js
 console.log("Intelligent Autofill Extension: Content script loaded.");
 
+let isAutofillRunning = false;
+let overlayEl = null;
+let overlayTimeout = null;
+
+function sendAutofillStatus(status, text, meta) {
+  try {
+    chrome.runtime.sendMessage({ action: "autofill_status", status, text, meta });
+  } catch (_) {}
+}
+
+function showProcessingOverlay(state, title, detail) {
+  if (!overlayEl) {
+    overlayEl = document.createElement('div');
+    overlayEl.className = 'autofill-extension-processing';
+    overlayEl.innerHTML = `
+      <div class="autofill-processing-title"></div>
+      <div class="autofill-processing-detail"></div>
+    `;
+    document.body.appendChild(overlayEl);
+  }
+
+  overlayEl.dataset.state = state;
+  const titleEl = overlayEl.querySelector('.autofill-processing-title');
+  const detailEl = overlayEl.querySelector('.autofill-processing-detail');
+  if (titleEl) titleEl.textContent = title || '';
+  if (detailEl) detailEl.textContent = detail || '';
+
+  if (overlayTimeout) {
+    clearTimeout(overlayTimeout);
+    overlayTimeout = null;
+  }
+}
+
+function hideProcessingOverlay(delay = 1200) {
+  if (!overlayEl) return;
+  overlayTimeout = window.setTimeout(() => {
+    overlayEl?.remove();
+    overlayEl = null;
+    overlayTimeout = null;
+  }, delay);
+}
+
 function isInVisibleModal(element) {
   const modalContainer = element.closest('[role="dialog"], [role="alertdialog"], dialog, .jobs-easy-apply-form-section__grouping, .artdeco-modal, .scaffold-layout__modal, [class*="modal"], [class*="Modal"], [class*="dialog"], [class*="Dialog"], [class*="artdeco"]');
   if (!modalContainer) return false;
@@ -164,8 +206,21 @@ function getAllInputs(root = document) {
 }
 
 async function autofillAll() {
+  if (isAutofillRunning) return;
+  isAutofillRunning = true;
+
   const inputs = getAllInputs().filter(isVisible);
   console.log(`Found ${inputs.length} visible fields to analyze...`);
+  sendAutofillStatus('running', 'Scanning page', `${inputs.length} fields detected`);
+  showProcessingOverlay('running', 'Scanning page', `${inputs.length} fields detected`);
+
+  if (inputs.length === 0) {
+    sendAutofillStatus('done', 'No fields found', 'Try another form');
+    showProcessingOverlay('done', 'No fields found', 'Try another form');
+    hideProcessingOverlay();
+    isAutofillRunning = false;
+    return;
+  }
 
   const fieldContexts = inputs.map((input, index) => {
     const htmlContext = getHtmlContext(input);
@@ -175,10 +230,15 @@ async function autofillAll() {
   chrome.runtime.sendMessage({ action: "deduceFormFields", fields: fieldContexts }, (response) => {
     if (!response || response.error) {
       console.warn("Autofill batch response error:", response && response.error);
+      sendAutofillStatus('error', 'Autofill failed', response?.error || 'Unknown error');
+      showProcessingOverlay('error', 'Autofill failed', response?.error || 'Unknown error');
+      hideProcessingOverlay();
+      isAutofillRunning = false;
       return;
     }
 
     const values = response.values || {};
+    let filledCount = 0;
 
     fieldContexts.forEach((ctx, index) => {
       const input = inputs[index];
@@ -190,6 +250,7 @@ async function autofillAll() {
       if (suggestion.startsWith("No saved values")) return;
 
       console.log(`Autofilling ${ctx.label || ctx.name || 'unknown'} with ${suggestion}`);
+      filledCount += 1;
 
       if (input.tagName === 'SELECT') {
         autofillSelect(input, suggestion);
@@ -212,6 +273,12 @@ async function autofillAll() {
         input.dispatchEvent(event);
       });
     });
+
+    const summary = `${filledCount} of ${inputs.length} fields filled`;
+    sendAutofillStatus('done', 'Autofill complete', summary);
+    showProcessingOverlay('done', 'Autofill complete', summary);
+    hideProcessingOverlay();
+    isAutofillRunning = false;
   });
 }
 

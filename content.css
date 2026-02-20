@@ -43,3 +43,50 @@
 .autofill-suggestion-item:hover {
     background-color: #f0f0f0; /* Highlight on hover */
 }
+
+.autofill-extension-processing {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    max-width: 260px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #f8fafc;
+    font-family: "Source Sans 3", "Helvetica Neue", sans-serif;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+    z-index: 2147483647;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    backdrop-filter: blur(8px);
+    animation: autofill-slide-in 0.3s ease;
+}
+
+.autofill-extension-processing[data-state="done"] {
+    background: rgba(15, 118, 110, 0.95);
+}
+
+.autofill-extension-processing[data-state="error"] {
+    background: rgba(185, 28, 28, 0.95);
+}
+
+.autofill-processing-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+    font-size: 13px;
+}
+
+.autofill-processing-detail {
+    font-size: 12px;
+    color: rgba(248, 250, 252, 0.8);
+}
+
+@keyframes autofill-slide-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
