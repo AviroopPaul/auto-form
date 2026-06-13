@@ -260,13 +260,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .map(f => `- ${f.fieldName}: ${(f.values || []).map(v => JSON.stringify(v)).join(", ")}`)
             .join("\n");
 
-          const prompt = `You are an expert in web forms. Map each form field to the best value from the available resume values.
+          // Only ask the model to fill fields that are currently empty. Already-filled
+          // fields are still sent (below) as page context so the model can understand
+          // who/what the form is about, but they must never be overwritten.
+          const emptyFields = fields.filter(f => f.isEmpty !== false);
+          const filledFields = fields.filter(f => f.isEmpty === false);
+
+          if (emptyFields.length === 0) {
+            sendResponse({ values: {} });
+            return;
+          }
+
+          let primaryUserName = "";
+          try {
+            primaryUserName = (JSON.parse(resumeJson).name || "").trim();
+          } catch (_) {}
+
+          const pageContext = request.pageContext || {};
+          const filledFieldsText = filledFields.length > 0
+            ? filledFields
+                .map(f => `- ${f.label || f.name || f.id || "field"}: ${JSON.stringify(f.currentValue || "")}`)
+                .join("\n")
+            : "(none)";
+
+          const prompt = `You are an expert in web forms. Your job is to fill the EMPTY fields on a page by intelligently mapping them to the user's saved values.
+
+How to think:
+1. First, understand WHO and WHAT this page/form is about. Use the page text, page title, and the fields that are ALREADY FILLED to identify the subject (for example, a person's name shown on the page).
+2. Decide whose information to use:
+   a. If the page CLEARLY indicates it belongs to a specific named person (e.g. a name is shown in the page text or an already-filled field), use the values qualified to THAT person. Some saved values are qualified by an entity (e.g. a saved field "Alex Jones Passport Number"); if the page is about Alex Jones, use that qualified value to fill the corresponding empty field (e.g. an empty "Passport No" field).
+   b. If there is NO name or any indication that the form belongs to a specific other person, DEFAULT to the primary user — the owner of the "Resume JSON" (and the generic, non-entity-qualified entries in "Available Values"). Fill the form with the primary user's own information.
+3. Map each EMPTY field to the single best value following the rule above.
 
 Rules:
-- Only use values that appear in "Available Values".
-- Return null if you are not confident.
+- ONLY return values for the fields listed under "Empty Fields To Fill". Never return a value for an already-filled field.
+- CRITICAL: You may ONLY output values that are copied VERBATIM from "Available Values" or "Resume JSON". Copy the exact characters.
+- NEVER invent, fabricate, guess, transform, or auto-generate a value. Do NOT produce realistic-looking placeholder or example data of ANY kind — e.g. fake passport/ID numbers like "Z7042616", emails like "name@example.com", phone numbers, dates, or addresses that are not literally present in the provided data.
+- If no matching value literally exists in the provided data for a field, return null. A missing field MUST stay empty. Returning null is always better than returning a made-up value.
 - For checkboxes, return "true" to check or null to leave unchecked.
-- For selects, prefer an option text that appears in the field's HTML snippet.
+- For selects, only choose an option whose text appears in the field's HTML snippet AND corresponds to a provided value; otherwise null.
 - Respond only with a JSON object.
 
 Required JSON shape:
@@ -276,14 +308,25 @@ Required JSON shape:
   }
 }
 
+Primary User: ${primaryUserName || "(the owner of the Resume JSON below)"}
+(When the page does not clearly belong to a specific other named person, fill the form as this primary user.)
+
+Page Context:
+Title: ${pageContext.title || ""}
+URL: ${pageContext.url || ""}
+Already-filled fields on the page (use ONLY to understand the subject — do not fill these):
+${filledFieldsText}
+Visible page text:
+${(pageContext.pageText || "").slice(0, 4000)}
+
 Available Values:
 ${availableFieldsText}
 
 Resume JSON:
 ${resumeJson}
 
-Fields:
-${JSON.stringify(fields, null, 2)}`;
+Empty Fields To Fill:
+${JSON.stringify(emptyFields, null, 2)}`;
 
           let response;
           try {
@@ -329,9 +372,34 @@ ${JSON.stringify(fields, null, 2)}`;
               }
 
               // Support both {"values": {...}} and direct mapping fallback
-              const values = llmResponse.values && typeof llmResponse.values === "object"
+              const rawValues = llmResponse.values && typeof llmResponse.values === "object"
                 ? llmResponse.values
                 : (typeof llmResponse === "object" ? llmResponse : {});
+
+              // Grounding guard: the model can hallucinate realistic-looking data
+              // (fake passport numbers, name@example.com, etc.). Drop any value
+              // that is not literally present in the user's saved data so we never
+              // fill a fabricated value.
+              const norm = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim();
+              const corpus = norm(
+                autofillFields.map(f => (f.values || []).join(" ")).join(" ") + " " + resumeJson
+              );
+              const BOOLEANS = new Set(["true", "false", "yes", "no", "1", "0", "checked", "on", "off"]);
+
+              const values = {};
+              Object.keys(rawValues).forEach((fieldId) => {
+                const v = rawValues[fieldId];
+                if (v === null || v === undefined || v === "") return; // leave empty
+                const nv = norm(v);
+                if (!nv) return;
+                if (BOOLEANS.has(nv)) { values[fieldId] = v; return; } // checkbox/radio
+                // Must appear verbatim somewhere in the saved data.
+                if (corpus.includes(nv)) {
+                  values[fieldId] = v;
+                } else {
+                  console.warn(`Dropping ungrounded value for ${fieldId}: ${JSON.stringify(v)}`);
+                }
+              });
 
               sendResponse({ values });
   
@@ -552,17 +620,16 @@ function runAutofillInTab(tabId) {
   const triggerAutofill = () => {
     document.dispatchEvent(new CustomEvent("autofill-extension-trigger"));
   };
+  // content.js is already registered as a content script (all_frames) via the
+  // manifest, so we must NOT re-inject the file here — doing so loads a second
+  // copy in each frame, producing duplicate (overlapping, lingering) toasts.
+  // Just dispatch the trigger event into every frame's isolated world.
   chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    files: ["content.js"]
-  }).then(() => {
-    return chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      world: "ISOLATED",
-      func: triggerAutofill
-    });
+    world: "ISOLATED",
+    func: triggerAutofill
   }).catch((err) => {
-    console.error("Autofill failed:", err);
+    console.error("Autofill trigger failed, falling back to message:", err);
     chrome.tabs.sendMessage(tabId, { action: "autofill_all_fields" }).catch(() => {});
   });
 }

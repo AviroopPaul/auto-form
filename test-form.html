@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Autofill Test — Entity-aware fill</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 40px auto; }
+    fieldset { border: 1px solid #ccc; border-radius: 8px; margin-bottom: 20px; padding: 16px; }
+    legend { font-weight: 600; }
+    label { display: block; margin: 12px 0 4px; font-size: 14px; }
+    input, select { width: 100%; padding: 8px; box-sizing: border-box; }
+    .hint { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h1>Autofill Test Page</h1>
+  <p class="hint">
+    To pass: the extension should keep the already-filled "Name" untouched and
+    fill the empty "Passport No" using a saved field qualified by the page subject
+    (e.g. a registered field "Alex Jones Passport Number" → "aas12445").
+  </p>
+
+  <fieldset>
+    <legend>Traveler Details</legend>
+
+    <label for="name">Name</label>
+    <!-- Already filled — must NOT be overwritten -->
+    <input type="text" id="name" name="name" value="Alex Jones" />
+
+    <label for="passport">Passport No</label>
+    <!-- Empty — should be filled with the passport number for Alex Jones -->
+    <input type="text" id="passport" name="passport" placeholder="" />
+
+    <label for="email">Email</label>
+    <!-- Already filled — must NOT be overwritten -->
+    <input type="email" id="email" name="email" value="alex@example.com" />
+
+    <label for="phone">Phone</label>
+    <!-- Empty -->
+    <input type="tel" id="phone" name="phone" />
+
+    <label for="country">Country</label>
+    <select id="country" name="country">
+      <option value="">Select...</option>
+      <option value="IN">India</option>
+      <option value="US">United States</option>
+      <option value="UK">United Kingdom</option>
+    </select>
+  </fieldset>
+</body>
+</html>
