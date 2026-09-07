@@ -1,4 +1,35 @@
+// Orion exposes Firefox-shaped APIs under `browser` and Chrome-shaped ones under
+// `chrome`, and provides both namespaces. Which namespace a given API actually
+// lands on is not safe to assume, so look for each one across both rather than
+// picking a namespace up front and then only searching that.
+function pickApi(name) {
+  const namespaces = [];
+  if (typeof browser !== 'undefined' && browser) namespaces.push(browser);
+  if (typeof chrome !== 'undefined' && chrome) namespaces.push(chrome);
+  for (const ns of namespaces) {
+    if (ns[name]) return ns[name];
+  }
+  return null;
+}
+
+const sidebarActionApi = pickApi('sidebarAction');
+const sidePanelApi = pickApi('sidePanel');
+
+// Docked-panel surfaces come in two flavours with different capability names:
+// Chrome has sidePanel; Orion honours the side_panel manifest key but exposes
+// Firefox's sidebarAction instead (it has no chrome.sidePanel at all). Testing
+// only one of them mistook Orion's sidebar for a popup and gave it popup sizing.
+const HAS_PANEL_SURFACE = !!(sidePanelApi && sidePanelApi.open) || !!sidebarActionApi;
+
+// A popup is size-constrained and closes on blur, so it needs its own sizing and a
+// hint pointing at the in-page toast rather than asking the user to keep it open.
+// The fallback window in background.js says so explicitly with ?popup=1; otherwise
+// having no panel surface at all (Safari) is what identifies a popup.
+const IS_POPUP = new URLSearchParams(location.search).get('popup') === '1'
+  || !HAS_PANEL_SURFACE;
+
 const autofillButton = document.getElementById('autofill-trigger');
+const openOptionsButton = document.getElementById('open-options');
 const statusTitle = document.getElementById('status-title');
 const statusMeta = document.getElementById('status-meta');
 const statusEl = document.querySelector('.status');
@@ -11,8 +42,13 @@ const resumeStatus = document.getElementById('resume-status');
 const fieldsContainer = document.getElementById('fields-container');
 const addFieldButton = document.getElementById('add-field');
 
-const apiKeyInput = document.getElementById('groq-api-key');
+const apiKeyInput = document.getElementById('openrouter-api-key');
 const apiStatus = document.getElementById('api-status');
+
+const transferJson = document.getElementById('transfer-json');
+const exportButton = document.getElementById('export-settings');
+const importButton = document.getElementById('import-settings');
+const transferStatus = document.getElementById('transfer-status');
 const tabs = document.querySelectorAll('.tab');
 const views = document.querySelectorAll('.view');
 
@@ -184,7 +220,7 @@ function renderAutofillFields() {
 
 function getSettingsPayload() {
   return {
-    groqApiKey: apiKeyInput.value,
+    openrouterApiKey: apiKeyInput.value,
     autofillFields,
     resumeJson: resumeJson || DEFAULT_RESUME_JSON
   };
@@ -206,7 +242,7 @@ function scheduleSave(statusEl, text) {
 function loadSettings() {
   chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
     const settings = (response && response.settings) ? response.settings : {};
-    apiKeyInput.value = settings.groqApiKey || settings.openaiApiKey || '';
+    apiKeyInput.value = settings.openrouterApiKey || '';
     resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
     if (settings.autofillFields && settings.autofillFields.length > 0) {
       autofillFields = settings.autofillFields;
@@ -224,13 +260,28 @@ function loadSettings() {
   });
 }
 
+// A popup leaves the underlying page active, so the plain query is already right
+// there. The guard is for the fallback window: one of our own pages can end up
+// being the active tab, and filling that instead of the form would be silent and
+// confusing. A tab whose URL we cannot read is not ours, so it stays eligible.
+async function resolveTargetTab() {
+  const ownPrefix = chrome.runtime.getURL('');
+  const isOwnPage = (tab) => !!tab && typeof tab.url === 'string' && tab.url.startsWith(ownPrefix);
+
+  const [active] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (active && !isOwnPage(active)) return active;
+
+  const candidates = await chrome.tabs.query({ active: true, windowType: 'normal' });
+  return candidates.find(tab => !isOwnPage(tab)) || active;
+}
+
 async function triggerAutofill() {
   if (isRunning) return;
   isRunning = true;
   autofillButton.disabled = true;
   setStatus('running', 'Starting autofill', 'Scanning the current page');
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = await resolveTargetTab();
   if (!tab || !tab.id) {
     setStatus('error', 'No active tab', 'Open a form page and try again');
     autofillButton.disabled = false;
@@ -323,7 +374,99 @@ resumeTextInput.addEventListener('input', () => {
   resumeStatus.textContent = 'Ready to parse';
 });
 
+// Writing settings through chrome.storage (via the background's saveSettings) is
+// the only transfer route that is guaranteed to land wherever a given browser
+// actually keeps extension storage. Editing the browser's own store on disk is
+// not: Orion, for one, loads sync storage into memory and never re-reads the file.
+function importSettingsJson(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (_) {
+    transferStatus.textContent = 'Not valid JSON';
+    return;
+  }
+
+  // Accept either a bare settings object or a whole storage dump: {"settings": {...}}.
+  const incoming = (parsed && typeof parsed.settings === 'object' && parsed.settings)
+    ? parsed.settings
+    : parsed;
+  if (!incoming || typeof incoming !== 'object') {
+    transferStatus.textContent = 'Nothing to import';
+    return;
+  }
+
+  const applied = [];
+  if (Array.isArray(incoming.autofillFields)) {
+    autofillFields = incoming.autofillFields
+      .filter(field => field && typeof field.fieldName === 'string')
+      .map(field => ({
+        fieldName: field.fieldName,
+        values: Array.isArray(field.values) ? field.values.filter(v => v !== null && v !== undefined) : []
+      }));
+    applied.push(`${autofillFields.length} fields`);
+  }
+  if (typeof incoming.resumeJson === 'string' && incoming.resumeJson.trim()) {
+    resumeJson = incoming.resumeJson;
+    applied.push('resume');
+  }
+  // Only adopt a key when one was really supplied, so importing an export that
+  // omits it cannot wipe the key already set up in this browser.
+  if (typeof incoming.openrouterApiKey === 'string' && incoming.openrouterApiKey.trim()) {
+    apiKeyInput.value = incoming.openrouterApiKey.trim();
+    applied.push('API key');
+  }
+
+  if (applied.length === 0) {
+    transferStatus.textContent = 'No recognised settings in that JSON';
+    return;
+  }
+
+  renderAutofillFields();
+  scheduleSave(transferStatus, `Imported ${applied.join(', ')}...`);
+}
+
 autofillButton.addEventListener('click', triggerAutofill);
+
+// A popup is a cramped place to manage nineteen fields, so offer the options page
+// as the roomy version. openOptionsPage is the right call because it reuses an
+// already-open options tab instead of piling up duplicates; opening the URL
+// directly is only the fallback where that API is missing.
+if (openOptionsButton) {
+  openOptionsButton.addEventListener('click', () => {
+    try {
+      if (chrome.runtime.openOptionsPage) {
+        chrome.runtime.openOptionsPage();
+      } else {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+      }
+    } catch (_) {
+      chrome.tabs.create({ url: chrome.runtime.getURL('options.html') });
+    }
+    // Get the popup out of the way now that the full page is opening. Inert in a
+    // docked panel, which is the correct outcome there.
+    window.close();
+  });
+}
+
+exportButton.addEventListener('click', () => {
+  transferJson.value = JSON.stringify({
+    autofillFields,
+    resumeJson: resumeJson || DEFAULT_RESUME_JSON
+  }, null, 2);
+  transferStatus.textContent = `Exported ${autofillFields.length} fields, copy the text above`;
+  transferJson.focus();
+  transferJson.select();
+});
+
+importButton.addEventListener('click', () => {
+  const raw = transferJson.value.trim();
+  if (!raw) {
+    transferStatus.textContent = 'Paste settings JSON first';
+    return;
+  }
+  importSettingsJson(raw);
+});
 
 chrome.runtime.onMessage.addListener((message) => {
   if (!message || message.action !== 'autofill_status') return;
@@ -340,6 +483,14 @@ chrome.runtime.onMessage.addListener((message) => {
     isRunning = false;
   }
 });
+
+if (IS_POPUP) {
+  document.body.classList.add('is-popup');
+  const hint = document.getElementById('panel-hint');
+  if (hint) {
+    hint.textContent = 'Progress shows on the page itself, so you can close this.';
+  }
+}
 
 loadSettings();
 

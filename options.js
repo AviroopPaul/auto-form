@@ -1,6 +1,6 @@
 // options.js
 document.addEventListener('DOMContentLoaded', () => {
-    const groqApiKeyInput = document.getElementById('groq-api-key');
+    const openrouterApiKeyInput = document.getElementById('openrouter-api-key');
     const saveApiKeyButton = document.getElementById('save-api-key');
     const apiKeyStatus = document.getElementById('api-key-status');
 
@@ -142,9 +142,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function getSettingsPayload() {
         const resumeJson = resumeJsonInput.value;
-        const groqApiKey = groqApiKeyInput.value;
+        const openrouterApiKey = openrouterApiKeyInput.value;
         return {
-            groqApiKey,
+            openrouterApiKey,
             autofillFields,
             resumeJson
         };
@@ -170,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadSettings() {
         chrome.runtime.sendMessage({ action: "getSettings" }, (response) => {
             const settings = (response && response.settings) ? response.settings : {};
-            groqApiKeyInput.value = settings.groqApiKey || settings.openaiApiKey || '';
+            openrouterApiKeyInput.value = settings.openrouterApiKey || '';
             const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
             resumeJsonInput.value = resumeJson;
             if (settings.autofillFields && settings.autofillFields.length > 0) {

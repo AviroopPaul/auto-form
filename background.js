@@ -1,6 +1,125 @@
 // background.js
 console.log("Intelligent Autofill Extension: Background script loaded.");
 
+// The OpenRouter key normally comes from the extension settings. For local use you
+// can instead drop it in config.local.js (gitignored) via ./write-local-config.sh,
+// which reads OPENROUTER_API_KEY from your shell.
+// Safari runs this file as a background *page* (see "preferred_environment" in the
+// manifest), where importScripts does not exist, so each environment needs its own
+// loader. Either way a missing config.local.js is fine: the key then has to come
+// from settings.
+function loadLocalConfig() {
+  if (typeof importScripts === "function") {
+    try {
+      importScripts("config.local.js");
+    } catch (_) {}
+    return;
+  }
+  if (typeof document === "undefined" || !document.head) return;
+  try {
+    const script = document.createElement("script");
+    script.src = chrome.runtime.getURL("config.local.js");
+    document.head.appendChild(script);
+  } catch (_) {}
+}
+
+loadLocalConfig();
+
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_MODEL = "minimax/minimax-m3:free";
+const OPENROUTER_REFERER = "https://github.com/AviroopPaul/auto-form";
+const OPENROUTER_TITLE = "Intelligent Autofill Extension";
+const OPENROUTER_KEY_ERROR = "Invalid API key format. Use your OpenRouter API key (starts with sk-or-).";
+
+function isValidOpenRouterKey(apiKey) {
+  return typeof apiKey === "string" && apiKey.startsWith("sk-or-");
+}
+
+// Prefers a key that actually looks like an OpenRouter one, wherever it lives, so a
+// leftover Groq key in storage cannot shadow a good key in config.local.js.
+function getOpenRouterApiKey(settings) {
+  const candidates = [
+    settings.openrouterApiKey,
+    self.LOCAL_OPENROUTER_API_KEY,
+    settings.apiKey,
+    settings.openaiApiKey
+  ].filter(key => typeof key === "string" && key.trim());
+  return (candidates.find(isValidOpenRouterKey) || candidates[0] || "").trim();
+}
+
+function openRouterHeaders(apiKey) {
+  return {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+    "HTTP-Referer": OPENROUTER_REFERER,
+    "X-Title": OPENROUTER_TITLE
+  };
+}
+
+// minimax-m3 accepts response_format, so JSON mode is on. Turn it off if the model is
+// swapped for one that rejects it (ling-3.0-flash-fin errors outright on response_format).
+// Note the provider honours it loosely and still fences its JSON sometimes, which is why
+// parseJsonContent below unwraps the response rather than trusting it to be bare JSON.
+const OPENROUTER_JSON_MODE = true;
+
+function openRouterBody(messages) {
+  const body = {
+    model: OPENROUTER_MODEL,
+    messages,
+    temperature: 0.1
+  };
+  if (OPENROUTER_JSON_MODE) {
+    body.response_format = { type: "json_object" };
+    // Only route to providers that actually honour the params we send. Without this,
+    // OpenRouter can pick a provider that ignores response_format or caps completions
+    // far below the model's advertised limit (SiliconFlow caps gpt-oss-120b at 8k).
+    body.provider = { require_parameters: true };
+  }
+  return body;
+}
+
+// The shared free-tier pool answers with a transient 429 fairly often, which would
+// otherwise surface as a failed autofill, so retry briefly before giving up.
+async function fetchOpenRouter(apiKey, messages) {
+  const retryStatuses = [429, 502, 503];
+  let response;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    response = await fetch(OPENROUTER_API_URL, {
+      method: "POST",
+      headers: openRouterHeaders(apiKey),
+      body: JSON.stringify(openRouterBody(messages))
+    });
+    if (!retryStatuses.includes(response.status)) return response;
+    if (attempt < 2) {
+      await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1)));
+    }
+  }
+  return response;
+}
+
+// Without JSON mode the model may fence its JSON or pad it with prose, so unwrap
+// before parsing and fall back to the outermost object in the text.
+function parseJsonContent(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") return {};
+  const cleaned = content.replace(/^\s*```(?:json)?/i, "").replace(/```\s*$/, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (_) {
+    // fall through to the brace scan below
+  }
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(cleaned.slice(start, end + 1));
+    } catch (_) {
+      return {};
+    }
+  }
+  return {};
+}
+
 const DEFAULT_RESUME = {
   name: "Aviroop Paul",
   email: "apavirooppaul10@gmail.com",
@@ -129,7 +248,7 @@ function buildAutofillFieldsFromResume(resume) {
   return fields;
 }
 
-async function parseResumeTextToJson(resumeText, groqApiKey) {
+async function parseResumeTextToJson(resumeText, apiKey) {
   const prompt = `Convert the following resume text into a clean, structured JSON object.
 
 Rules:
@@ -176,22 +295,10 @@ Rules:
 Resume text:
 ${resumeText}`;
 
-  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${groqApiKey}`
-    },
-    body: JSON.stringify({
-      model: "openai/gpt-oss-120b",
-      messages: [
+  const response = await fetchOpenRouter(apiKey, [
         { role: "system", content: "You convert resume text into strict JSON following the given schema." },
         { role: "user", content: prompt }
-      ],
-      response_format: { type: "json_object" },
-      temperature: 0.1
-    })
-  });
+      ]);
 
   if (!response.ok) {
     let errorBody = "";
@@ -206,17 +313,11 @@ ${resumeText}`;
       }
     }
     const statusLine = `${response.status} ${response.statusText}`.trim();
-    throw new Error(`Groq API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
+    throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
   }
 
   const data = await response.json();
-  let parsed = {};
-  try {
-    parsed = JSON.parse(data.choices[0].message.content);
-  } catch (_) {
-    parsed = {};
-  }
-  return parsed;
+  return parseJsonContent(data);
 }
 
 // Listen for messages from content scripts or options page
@@ -224,7 +325,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === "deduceFormFields") {
       chrome.storage.sync.get("settings", async (data) => {
           const settings = data.settings || {};
-          const groqApiKey = settings.groqApiKey || settings.openaiApiKey;
+          const apiKey = getOpenRouterApiKey(settings);
           let autofillFields = settings.autofillFields || [];
           const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
           if (autofillFields.length === 0) {
@@ -242,15 +343,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return;
           }
 
-          if (!groqApiKey) {
-              console.warn("Groq API Key is not set. Cannot deduce form fields.");
+          if (!apiKey) {
+              console.warn("OpenRouter API Key is not set. Cannot deduce form fields.");
               sendResponse({ error: "API Key not set", values: {} });
               return;
           }
-          if (groqApiKey.startsWith("sk-") && !groqApiKey.startsWith("gsk_")) {
-              console.warn("Detected a non-Groq API key. Please use a Groq key (typically starts with gsk_).");
+          if (!isValidOpenRouterKey(apiKey)) {
+              console.warn(OPENROUTER_KEY_ERROR);
               sendResponse({
-                error: "Invalid API key format. Use your Groq API key (typically starts with gsk_).",
+                error: OPENROUTER_KEY_ERROR,
                 values: {}
               });
               return;
@@ -330,22 +431,10 @@ ${JSON.stringify(emptyFields, null, 2)}`;
 
           let response;
           try {
-              response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                  method: "POST",
-                  headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${groqApiKey}`
-                  },
-                  body: JSON.stringify({
-                      model: "openai/gpt-oss-120b",
-                      messages: [
+              response = await fetchOpenRouter(apiKey, [
                           { role: "system", content: "You are an expert in web forms and can semantically map form fields to resume values." },
                           { role: "user", content: prompt }
-                      ],
-                      response_format: { type: "json_object" },
-                      temperature: 0.1
-                  })
-              });
+                      ]);
 
               if (!response.ok) {
                   let errorBody = "";
@@ -360,16 +449,11 @@ ${JSON.stringify(emptyFields, null, 2)}`;
                       }
                   }
                   const statusLine = `${response.status} ${response.statusText}`.trim();
-                  throw new Error(`Groq API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
+                  throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
               }
 
               const data = await response.json();
-              let llmResponse = {};
-              try {
-                llmResponse = JSON.parse(data.choices[0].message.content);
-              } catch (_) {
-                llmResponse = {};
-              }
+              const llmResponse = parseJsonContent(data);
 
               // Support both {"values": {...}} and direct mapping fallback
               const rawValues = llmResponse.values && typeof llmResponse.values === "object"
@@ -404,7 +488,7 @@ ${JSON.stringify(emptyFields, null, 2)}`;
               sendResponse({ values });
   
           } catch (error) {
-              console.error("Error calling Groq API:", error);
+              console.error("Error calling OpenRouter API:", error);
               sendResponse({ error: `Error: ${error.message}`, values: {} });
           }
       });
@@ -412,7 +496,7 @@ ${JSON.stringify(emptyFields, null, 2)}`;
     } else if (request.action === "deduceFieldType") {
       chrome.storage.sync.get("settings", async (data) => {
           const settings = data.settings || {};
-          const groqApiKey = settings.groqApiKey || settings.openaiApiKey;
+          const apiKey = getOpenRouterApiKey(settings);
           let autofillFields = settings.autofillFields || [];
           const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
           if (autofillFields.length === 0) {
@@ -425,16 +509,16 @@ ${JSON.stringify(emptyFields, null, 2)}`;
           }
           const htmlContext = request.htmlContext;
   
-          if (!groqApiKey) {
-              console.warn("Groq API Key is not set. Cannot deduce field type.");
+          if (!apiKey) {
+              console.warn("OpenRouter API Key is not set. Cannot deduce field type.");
               sendResponse({ inferredType: "text", suggestions: ["API Key not set"] });
               return;
           }
-          if (groqApiKey.startsWith("sk-") && !groqApiKey.startsWith("gsk_")) {
-              console.warn("Detected a non-Groq API key. Please use a Groq key (typically starts with gsk_).");
+          if (!isValidOpenRouterKey(apiKey)) {
+              console.warn(OPENROUTER_KEY_ERROR);
               sendResponse({
                 inferredType: "error",
-                suggestions: ["Invalid API key format. Use your Groq API key (typically starts with gsk_)."]
+                suggestions: [OPENROUTER_KEY_ERROR]
               });
               return;
           }
@@ -467,22 +551,10 @@ Outer HTML: ${htmlContext.html}`;
   
           let response;
           try {
-              response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                  method: "POST",
-                  headers: {
-                      "Content-Type": "application/json",
-                      "Authorization": `Bearer ${groqApiKey}`
-                  },
-                  body: JSON.stringify({
-                      model: "openai/gpt-oss-120b",
-                      messages: [
+              response = await fetchOpenRouter(apiKey, [
                           { role: "system", content: "You are an expert in web forms and can semantically identify form field types based on HTML context and map them to user-defined fields." },
                           { role: "user", content: prompt }
-                      ],
-                      response_format: { type: "json_object" },
-                      temperature: 0.1
-                  })
-              });
+                      ]);
   
               if (!response.ok) {
                   let errorBody = "";
@@ -497,11 +569,11 @@ Outer HTML: ${htmlContext.html}`;
                       }
                   }
                   const statusLine = `${response.status} ${response.statusText}`.trim();
-                  throw new Error(`Groq API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
+                  throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
               }
   
               const data = await response.json();
-              const llmResponse = JSON.parse(data.choices[0].message.content);
+              const llmResponse = parseJsonContent(data);
               
               let suggestions = [];
               let finalType = "";
@@ -530,7 +602,7 @@ Outer HTML: ${htmlContext.html}`;
               sendResponse({ inferredType: finalType, suggestions: suggestions });
   
           } catch (error) {
-              console.error("Error calling Groq API:", error);
+              console.error("Error calling OpenRouter API:", error);
               sendResponse({ inferredType: "error", suggestions: [`Error: ${error.message}`] });
           }
       });
@@ -547,10 +619,6 @@ Outer HTML: ${htmlContext.html}`;
         sendResponse({ settings: data.settings });
       });
       return true; // Indicate that sendResponse will be called asynchronously
-    } else if (request.action === "openOptions") {
-      chrome.runtime.openOptionsPage();
-      sendResponse({ success: true });
-      return true;
     } else if (request.action === "parseResume") {
       const resumeText = request.resumeText || "";
       if (!resumeText.trim()) {
@@ -560,17 +628,17 @@ Outer HTML: ${htmlContext.html}`;
       chrome.storage.sync.get("settings", async (data) => {
         try {
           const settings = data.settings || {};
-          const groqApiKey = settings.groqApiKey || settings.openaiApiKey;
-          if (!groqApiKey) {
+          const apiKey = getOpenRouterApiKey(settings);
+          if (!apiKey) {
             sendResponse({ error: "API Key not set" });
             return;
           }
-          if (groqApiKey.startsWith("sk-") && !groqApiKey.startsWith("gsk_")) {
-            sendResponse({ error: "Invalid API key format. Use your Groq API key (typically starts with gsk_)." });
+          if (!isValidOpenRouterKey(apiKey)) {
+            sendResponse({ error: OPENROUTER_KEY_ERROR });
             return;
           }
 
-          const parsedResume = await parseResumeTextToJson(resumeText, groqApiKey);
+          const parsedResume = await parseResumeTextToJson(resumeText, apiKey);
           const resumeJson = JSON.stringify(parsedResume, null, 2);
           const autofillFields = buildAutofillFieldsFromResume(parsedResume);
           sendResponse({ resumeJson, autofillFields });
@@ -592,17 +660,95 @@ Outer HTML: ${htmlContext.html}`;
     }
   });
 
-// Listen for clicks on the extension icon
-if (chrome.sidePanel?.setPanelBehavior) {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// Safari has no side panel surface at all (no sidePanel API, no side_panel manifest
+// key, not even Firefox's sidebar_action), so the toolbar button there opens
+// sidepanel.html as a popup instead. That is why the manifest declares
+// default_popup: browsers without a panel get the popup with no runtime call
+// needed. Chrome, which does have a panel, clears the popup below so its own
+// toolbar click keeps opening the side panel.
+const HAS_SIDE_PANEL = !!(chrome.sidePanel && chrome.sidePanel.open);
+
+// Orion is the one engine that exposes BOTH Chrome's sidePanel and Firefox's
+// sidebarAction; Chrome has only the former and Firefox only the latter. That
+// combination is the fingerprint, and it matters because neither of Orion's
+// implementations can actually close a docked panel: sidebarAction.close()
+// rejects with "unable to find toolbar item", setOptions({enabled:false}) is
+// accepted and ignored, and window.close() is inert. A popup has none of those
+// problems, so prefer one there.
+const PREFER_POPUP = HAS_SIDE_PANEL && !!pickApi("sidebarAction");
+const POPUP_PAGE = "sidepanel.html?popup=1";
+
+// setPopup/setPanelBehavior return a promise on MV3 but not on every engine, so
+// swallow failures without assuming a thenable came back.
+function settle(result) {
+  if (result && typeof result.catch === "function") result.catch(() => {});
 }
 
-chrome.action.onClicked.addListener((tab) => {
-  if (chrome.sidePanel?.open && tab?.id) {
-    chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+function configureActionSurface() {
+  if (!HAS_SIDE_PANEL) return; // Safari: the manifest's default_popup handles it.
+
+  if (PREFER_POPUP) {
+    // Set the popup explicitly rather than trusting the manifest default: an
+    // earlier run cleared it to use the docked panel, and that cleared state
+    // persists across restarts. The query string is what tells the page to style
+    // itself as a popup, which capability detection alone cannot do here because
+    // this engine does have panel APIs.
+    try {
+      settle(chrome.action.setPopup({ popup: POPUP_PAGE }));
+    } catch (_) {}
+    // And stop the browser opening the docked panel on the same click.
+    try {
+      settle(chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }));
+    } catch (_) {}
     return;
   }
-  chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") });
+
+  try {
+    settle(chrome.action.setPopup({ popup: "" }));
+  } catch (_) {}
+  try {
+    settle(chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }));
+  } catch (_) {}
+  // Safety net: if an earlier close attempt left the panel disabled, this puts it
+  // back on every startup so the panel can never get stuck permanently off.
+  try {
+    settle(chrome.sidePanel.setOptions({ enabled: true, path: "sidepanel.html" }));
+  } catch (_) {}
+}
+
+configureActionSurface();
+chrome.runtime.onInstalled.addListener(configureActionSurface);
+if (chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(configureActionSurface);
+}
+
+// Firefox-shaped sidebar APIs live on `browser` in some engines and `chrome` in
+// others, so look across both rather than assuming a namespace.
+function pickApi(name) {
+  if (typeof browser !== "undefined" && browser && browser[name]) return browser[name];
+  if (typeof chrome !== "undefined" && chrome && chrome[name]) return chrome[name];
+  return null;
+}
+
+// Only reached when the surface configured above did not take effect, because
+// every engine we support has the browser itself consume the click: a popup via
+// setPopup, or the docked panel via openPanelOnActionClick. So this is purely a
+// "nothing else worked" path, and the right thing here is to show the UI rather
+// than attempt a toggle through APIs that are absent or inert.
+chrome.action.onClicked.addListener((tab) => {
+  if (HAS_SIDE_PANEL && !PREFER_POPUP && tab?.id) {
+    settle(chrome.sidePanel.open({ tabId: tab.id }));
+    return;
+  }
+  // A window rather than a tab: sidepanel.js resolves the form's tab by skipping
+  // our own pages, but a popup window keeps the underlying tab active and makes
+  // that lookup unnecessary.
+  chrome.windows.create({
+    url: chrome.runtime.getURL(POPUP_PAGE),
+    type: "popup",
+    width: 420,
+    height: 640
+  });
 });
 
 // Keyboard shortcut for autofill (keeps modal focused - no popup to steal focus)

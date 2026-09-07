@@ -452,9 +452,4 @@ function autofillSelect(select, value) {
   }
 }
 
-// Expose for scripting.executeScript to call (runs in all frames)
-try {
-  window.__autofillExtension = { autofillAll };
-} catch (_) {}
-
 } // end initAutofillExtension

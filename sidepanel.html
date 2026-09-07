@@ -14,6 +14,11 @@
         <h1>Autofill Studio</h1>
         <p>One-click form completion, tuned to your resume.</p>
       </div>
+      <button type="button" id="open-options" class="hero-action" aria-label="Open settings page" title="Open settings page for more room">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+        </svg>
+      </button>
     </header>
 
     <nav class="tabs">
@@ -31,7 +36,7 @@
           </div>
         </div>
         <button id="autofill-trigger" class="primary">Auto Fill This Page</button>
-        <div class="hint">Keep this panel open while it fills the form.</div>
+        <div class="hint" id="panel-hint">Keep this panel open while it fills the form.</div>
       </section>
     </section>
 
@@ -65,10 +70,26 @@
       <section class="card">
         <div class="card-header">
           <h2>API Key</h2>
-          <span class="tag">Groq</span>
+          <span class="tag">OpenRouter</span>
         </div>
-        <input type="password" id="groq-api-key" placeholder="gsk_..." />
+        <input type="password" id="openrouter-api-key" placeholder="sk-or-v1-..." />
         <div class="autosave" id="api-status">Not saved</div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Transfer</h2>
+          <span class="tag">Import / Export</span>
+        </div>
+        <p class="card-copy">Move fields between browsers. Export writes your current setup below to copy out. Import reads pasted JSON and replaces your fields and resume. Your API key is never exported, and importing only changes it if the pasted copy actually contains one.</p>
+        <textarea id="transfer-json" rows="4" placeholder="Paste exported settings JSON here, then press Import"></textarea>
+        <div class="row">
+          <div class="transfer-actions">
+            <button id="export-settings" class="ghost">Export</button>
+            <button id="import-settings" class="ghost">Import</button>
+          </div>
+          <div class="autosave" id="transfer-status">Idle</div>
+        </div>
       </section>
     </section>
   </div>
