@@ -292,6 +292,7 @@ body {
 }
 
 textarea,
+select,
 input[type="password"],
 input[type="text"] {
   border-radius: 12px;
@@ -301,6 +302,19 @@ input[type="text"] {
   font-size: 12px;
   color: var(--ink);
   background: rgba(255, 255, 255, 0.9);
+}
+
+/* The model list runs to a few hundred entries, so the closed control has to stay
+   inside the rail: let it shrink and ellipsize rather than force the panel wide. */
+select {
+  width: 100%;
+  max-width: 100%;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 textarea {
@@ -328,6 +342,33 @@ textarea {
 .transfer-actions {
   display: flex;
   gap: 8px;
+}
+
+/* Resolved description of whatever model id is currently in the box: price,
+   context, and whether it is in the fetched catalogue at all. */
+.model-meta {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  min-height: 16px;
+}
+
+.model-meta.is-custom {
+  color: #b45309;
+}
+
+.checkline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.checkline input {
+  accent-color: var(--accent);
+  margin: 0;
 }
 
 .fields {

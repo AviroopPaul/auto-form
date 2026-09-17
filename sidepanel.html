@@ -38,6 +38,23 @@
         <button id="autofill-trigger" class="primary">Auto Fill This Page</button>
         <div class="hint" id="panel-hint">Keep this panel open while it fills the form.</div>
       </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Model</h2>
+          <span class="tag" id="model-tag">Loading</span>
+        </div>
+        <select id="provider-select" aria-label="Provider"></select>
+        <div class="model-meta" id="provider-blurb"></div>
+        <select id="model-select" aria-label="Model"></select>
+        <input type="text" id="model-custom" placeholder="model-id" autocomplete="off" spellcheck="false" hidden />
+        <div class="model-meta" id="model-meta">Loading models...</div>
+        <div class="row">
+          <label class="checkline" id="free-only-line"><input type="checkbox" id="model-free-only" /> Free only</label>
+          <button id="refresh-models" class="ghost">Refresh list</button>
+        </div>
+        <div class="autosave" id="model-status">Autosave on</div>
+      </section>
     </section>
 
     <section class="view" data-view="settings">
@@ -70,18 +87,23 @@
       <section class="card">
         <div class="card-header">
           <h2>API Key</h2>
-          <span class="tag">OpenRouter</span>
+          <span class="tag" id="api-provider-tag">Gemini</span>
         </div>
-        <input type="password" id="openrouter-api-key" placeholder="sk-or-v1-..." />
-        <div class="autosave" id="api-status">Not saved</div>
+        <p class="card-copy">Key for the provider selected on the Autofill tab. Each provider's key is stored separately, so switching back and forth keeps both.</p>
+        <input type="password" id="api-key" placeholder="AIza..." />
+        <div class="row">
+          <a id="api-key-link" href="#" target="_blank" rel="noreferrer">Get a key</a>
+          <div class="autosave" id="api-status">Not saved</div>
+        </div>
       </section>
+
 
       <section class="card">
         <div class="card-header">
           <h2>Transfer</h2>
           <span class="tag">Import / Export</span>
         </div>
-        <p class="card-copy">Move fields between browsers. Export writes your current setup below to copy out. Import reads pasted JSON and replaces your fields and resume. Your API key is never exported, and importing only changes it if the pasted copy actually contains one.</p>
+        <p class="card-copy">Move fields between browsers. Export writes your current setup below to copy out. Import reads pasted JSON and replaces your fields, resume, and model. Your API key is never exported, and importing only changes it if the pasted copy actually contains one.</p>
         <textarea id="transfer-json" rows="4" placeholder="Paste exported settings JSON here, then press Import"></textarea>
         <div class="row">
           <div class="transfer-actions">

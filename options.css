@@ -25,12 +25,22 @@ label {
 
 input[type="text"],
 input[type="password"],
+select,
 textarea {
     width: calc(100% - 22px);
     padding: 10px;
     margin-bottom: 10px;
     border: 1px solid #ddd;
     border-radius: 4px;
+}
+
+select {
+    background-color: #fff;
+    cursor: pointer;
+}
+
+[hidden] {
+    display: none !important;
 }
 
 textarea {
@@ -76,9 +86,33 @@ p {
     color: #666;
 }
 
-#api-key-status, #autofill-fields-status {
+#api-key-status, #autofill-fields-status, #model-status {
     color: green;
     font-weight: bold;
+}
+
+/* Resolved description of whatever model id is in the box: price, context, and
+   whether it is in the fetched catalogue at all. */
+.model-meta {
+    font-style: normal;
+    color: #555;
+}
+
+.model-meta.is-custom {
+    color: #b45309;
+}
+
+.checkline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: normal;
+    margin-bottom: 12px;
+}
+
+.checkline input {
+    width: auto;
+    margin: 0;
 }
 
 

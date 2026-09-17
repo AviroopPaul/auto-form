@@ -42,8 +42,21 @@ const resumeStatus = document.getElementById('resume-status');
 const fieldsContainer = document.getElementById('fields-container');
 const addFieldButton = document.getElementById('add-field');
 
-const apiKeyInput = document.getElementById('openrouter-api-key');
+const apiKeyInput = document.getElementById('api-key');
 const apiStatus = document.getElementById('api-status');
+const apiProviderTag = document.getElementById('api-provider-tag');
+const apiKeyLink = document.getElementById('api-key-link');
+
+const providerSelect = document.getElementById('provider-select');
+const providerBlurb = document.getElementById('provider-blurb');
+const modelSelect = document.getElementById('model-select');
+const modelCustom = document.getElementById('model-custom');
+const modelMeta = document.getElementById('model-meta');
+const modelTag = document.getElementById('model-tag');
+const modelFreeOnly = document.getElementById('model-free-only');
+const freeOnlyLine = document.getElementById('free-only-line');
+const refreshModelsButton = document.getElementById('refresh-models');
+const modelStatus = document.getElementById('model-status');
 
 const transferJson = document.getElementById('transfer-json');
 const exportButton = document.getElementById('export-settings');
@@ -55,7 +68,28 @@ const views = document.querySelectorAll('.view');
 let autofillFields = [];
 let resumeJson = '';
 let saveTimer = null;
+let keyReloadTimer = null;
 let isRunning = false;
+
+// Kept alongside the controls rather than read off them at save time, so a save
+// that fires before the catalogue has loaded cannot write an empty model id and
+// quietly reset the choice back to the default.
+let selectedProvider = '';
+let selectedModel = '';
+let modelCatalog = [];
+let providers = [];
+let modelInitialized = false;
+
+// Both are remembered per provider so switching to Gemini and back does not lose
+// the OpenRouter key, or leave an OpenRouter model id pointed at Google.
+const apiKeys = {};
+const modelByProvider = {};
+
+const CUSTOM_MODEL_OPTION = '__custom__';
+
+function providerInfo(id) {
+  return providers.find(p => p.id === (id || selectedProvider)) || null;
+}
 
 const DEFAULT_RESUME = {
   name: "Aviroop Paul",
@@ -219,11 +253,187 @@ function renderAutofillFields() {
 }
 
 function getSettingsPayload() {
+  if (selectedProvider) modelByProvider[selectedProvider] = selectedModel;
   return {
-    openrouterApiKey: apiKeyInput.value,
+    provider: selectedProvider,
+    models: { ...modelByProvider },
+    geminiApiKey: apiKeys.gemini || '',
+    openrouterApiKey: apiKeys.openrouter || '',
     autofillFields,
     resumeJson: resumeJson || DEFAULT_RESUME_JSON
   };
+}
+
+function formatContext(tokens) {
+  if (!tokens) return '';
+  if (tokens >= 1e6) return `${Math.round(tokens / 1e5) / 10}M`;
+  if (tokens >= 1e3) return `${Math.round(tokens / 1e3)}K`;
+  return String(tokens);
+}
+
+function formatPrice(perMillion) {
+  if (perMillion === null || perMillion === undefined) return '?';
+  if (perMillion === 0) return '$0';
+  if (perMillion >= 1) return `$${perMillion.toFixed(2)}`;
+  // Sub-dollar rates need a third decimal to stay distinguishable, but keep at
+  // least two so a rate never renders as "$0.1" next to a "$0.037".
+  return `$${perMillion.toFixed(3).replace(/(\.\d{2}\d*?)0+$/, '$1')}`;
+}
+
+function modelSummary(model) {
+  let price;
+  if (model.free) {
+    price = 'Free';
+  } else if (model.prompt === null || model.completion === null) {
+    // Routers such as openrouter/auto do not publish a fixed rate.
+    price = 'Variable pricing';
+  } else {
+    price = `${formatPrice(model.prompt)} in / ${formatPrice(model.completion)} out per 1M`;
+  }
+  const context = model.context ? ` · ${formatContext(model.context)} ctx` : '';
+  return `${price}${context}`;
+}
+
+function renderProviderOptions() {
+  providerSelect.innerHTML = '';
+  providers.forEach((p) => {
+    const option = document.createElement('option');
+    option.value = p.id;
+    option.textContent = p.label;
+    providerSelect.appendChild(option);
+  });
+  providerSelect.value = selectedProvider;
+  const info = providerInfo();
+  providerBlurb.textContent = info ? info.blurb : '';
+  syncKeyCard();
+}
+
+// The key card lives on the Settings tab but belongs to whichever provider is
+// picked on the Autofill tab, so it re-labels itself rather than showing one
+// field per provider.
+function syncKeyCard() {
+  const info = providerInfo();
+  if (!info) return;
+  apiProviderTag.textContent = info.label;
+  apiKeyInput.placeholder = info.keyHint;
+  apiKeyInput.value = apiKeys[info.id] || '';
+  apiKeyLink.href = info.keyUrl;
+  apiKeyLink.textContent = `Get a ${info.label} key`;
+  apiStatus.textContent = apiKeyInput.value ? 'Saved' : 'Not saved';
+}
+
+// True for an id the fetched catalogue does not contain: either one typed by hand
+// or one that has since been retired upstream. Either way it stays editable as
+// free text rather than silently vanishing from the dropdown.
+function isCustomModel() {
+  return !!selectedModel && !modelCatalog.some(m => m.id === selectedModel);
+}
+
+function renderModelOptions() {
+  let list = modelFreeOnly.checked ? modelCatalog.filter(m => m.free) : modelCatalog;
+
+  // Keep the current choice in the list even when the filter would hide it,
+  // otherwise turning on "Free only" would silently reassign a paid selection.
+  const current = modelCatalog.find(m => m.id === selectedModel);
+  if (current && !list.includes(current)) list = [current, ...list];
+
+  modelSelect.innerHTML = '';
+  [
+    { label: 'Free', items: list.filter(m => m.free) },
+    { label: 'Paid', items: list.filter(m => !m.free) }
+  ].forEach(({ label, items }) => {
+    if (items.length === 0) return;
+    const group = document.createElement('optgroup');
+    group.label = label;
+    items.forEach((model) => {
+      const option = document.createElement('option');
+      option.value = model.id;
+      option.textContent = `${model.name} — ${modelSummary(model)}`;
+      group.appendChild(option);
+    });
+    modelSelect.appendChild(group);
+  });
+
+  const customOption = document.createElement('option');
+  customOption.value = CUSTOM_MODEL_OPTION;
+  customOption.textContent = 'Custom model id...';
+  modelSelect.appendChild(customOption);
+
+  syncModelControls();
+}
+
+function syncModelControls() {
+  const custom = isCustomModel();
+  modelSelect.value = custom ? CUSTOM_MODEL_OPTION : selectedModel;
+  modelCustom.hidden = !custom;
+  if (custom) modelCustom.value = selectedModel;
+  describeSelectedModel();
+}
+
+function describeSelectedModel() {
+  const id = selectedModel.trim();
+  const known = modelCatalog.find(m => m.id === id);
+
+  if (!id) {
+    modelTag.textContent = 'Default';
+    modelMeta.classList.remove('is-custom');
+    modelMeta.textContent = 'No model chosen, so the built-in default is used.';
+    return;
+  }
+
+  if (!known) {
+    const label = providerInfo()?.label || 'the provider';
+    modelTag.textContent = 'Custom';
+    modelMeta.classList.add('is-custom');
+    modelMeta.textContent = modelCatalog.length
+      ? `Not in the fetched catalogue. It is sent to ${label} exactly as typed, so check the spelling.`
+      : `Catalogue not loaded yet. It is sent to ${label} exactly as typed.`;
+    return;
+  }
+
+  modelTag.textContent = known.free ? 'Free' : 'Paid';
+  modelMeta.classList.remove('is-custom');
+  modelMeta.textContent = `${known.name} — ${modelSummary(known)}${known.json ? '' : ' · no JSON mode'}`;
+}
+
+function loadModels({ refresh = false, provider = null, keepModel = false } = {}) {
+  modelStatus.textContent = refresh ? 'Refreshing...' : 'Loading models...';
+  chrome.runtime.sendMessage({ action: 'getModels', refresh, provider }, (response) => {
+    if (!response) {
+      modelStatus.textContent = 'Could not load models';
+      return;
+    }
+    providers = Array.isArray(response.providers) ? response.providers : [];
+    selectedProvider = response.provider || selectedProvider;
+    modelCatalog = Array.isArray(response.models) ? response.models : [];
+
+    // The background resolves the effective model (saved value, else the provider
+    // default), so this is also where the control gets its value. `keepModel` is
+    // for a plain refresh, which must not discard a choice just made.
+    if (!modelInitialized || !keepModel) {
+      modelInitialized = true;
+      selectedModel = response.selected || response.defaultModel || '';
+    }
+
+    renderProviderOptions();
+    renderModelOptions();
+
+    // A free-only filter is noise where every model is free.
+    freeOnlyLine.hidden = modelCatalog.every(m => m.free);
+
+    if (!response.hasKey) {
+      modelStatus.textContent = 'Add an API key on the Settings tab';
+    } else if (response.stale) {
+      modelStatus.textContent = response.fetchedAt
+        ? `Showing the list cached ${new Date(response.fetchedAt).toLocaleDateString()}`
+        : `Could not reach ${providerInfo()?.label || 'the provider'}, showing a built-in list`;
+    } else {
+      modelStatus.textContent = `${modelCatalog.length} models loaded`;
+      setTimeout(() => {
+        if (modelStatus.textContent.endsWith('models loaded')) modelStatus.textContent = 'Autosave on';
+      }, 2500);
+    }
+  });
 }
 
 function scheduleSave(statusEl, text) {
@@ -242,7 +452,9 @@ function scheduleSave(statusEl, text) {
 function loadSettings() {
   chrome.runtime.sendMessage({ action: 'getSettings' }, (response) => {
     const settings = (response && response.settings) ? response.settings : {};
-    apiKeyInput.value = settings.openrouterApiKey || '';
+    apiKeys.gemini = settings.geminiApiKey || '';
+    apiKeys.openrouter = settings.openrouterApiKey || '';
+    Object.assign(modelByProvider, settings.models || {});
     resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
     if (settings.autofillFields && settings.autofillFields.length > 0) {
       autofillFields = settings.autofillFields;
@@ -255,8 +467,10 @@ function loadSettings() {
       }
     }
     renderAutofillFields();
-    apiStatus.textContent = apiKeyInput.value ? 'Saved' : 'Not saved';
     resumeStatus.textContent = 'Idle';
+    // Chained rather than fired in parallel: the model list depends on which
+    // provider is stored and, for Gemini, on its key.
+    loadModels();
   });
 }
 
@@ -367,8 +581,48 @@ addFieldButton.addEventListener('click', () => {
 });
 
 apiKeyInput.addEventListener('input', () => {
+  if (selectedProvider) apiKeys[selectedProvider] = apiKeyInput.value.trim();
   scheduleSave(apiStatus, 'Saving key...');
+  // Gemini's catalogue is per-key, so a first key is what makes the list loadable.
+  if (modelCatalog.length <= 3 && apiKeyInput.value.trim()) {
+    clearTimeout(keyReloadTimer);
+    keyReloadTimer = setTimeout(() => loadModels({ refresh: true, keepModel: true }), 900);
+  }
 });
+
+providerSelect.addEventListener('change', () => {
+  if (selectedProvider) modelByProvider[selectedProvider] = selectedModel;
+  selectedProvider = providerSelect.value;
+  modelCatalog = [];
+  syncKeyCard();
+  // Ask for the newly chosen provider explicitly: the change is not saved yet, so
+  // the background would otherwise answer for the previously stored one.
+  loadModels({ provider: selectedProvider });
+  scheduleSave(modelStatus, 'Saving provider...');
+});
+
+modelSelect.addEventListener('change', () => {
+  if (modelSelect.value === CUSTOM_MODEL_OPTION) {
+    modelCustom.hidden = false;
+    selectedModel = modelCustom.value.trim();
+    modelCustom.focus();
+  } else {
+    modelCustom.hidden = true;
+    selectedModel = modelSelect.value;
+  }
+  describeSelectedModel();
+  scheduleSave(modelStatus, 'Saving model...');
+});
+
+modelCustom.addEventListener('input', () => {
+  selectedModel = modelCustom.value.trim();
+  describeSelectedModel();
+  scheduleSave(modelStatus, 'Saving model...');
+});
+
+modelFreeOnly.addEventListener('change', renderModelOptions);
+
+refreshModelsButton.addEventListener('click', () => loadModels({ refresh: true, keepModel: true }));
 
 resumeTextInput.addEventListener('input', () => {
   resumeStatus.textContent = 'Ready to parse';
@@ -410,12 +664,32 @@ function importSettingsJson(raw) {
     resumeJson = incoming.resumeJson;
     applied.push('resume');
   }
-  // Only adopt a key when one was really supplied, so importing an export that
-  // omits it cannot wipe the key already set up in this browser.
-  if (typeof incoming.openrouterApiKey === 'string' && incoming.openrouterApiKey.trim()) {
-    apiKeyInput.value = incoming.openrouterApiKey.trim();
-    applied.push('API key');
+  if (incoming.models && typeof incoming.models === 'object') {
+    Object.entries(incoming.models).forEach(([id, value]) => {
+      if (typeof value === 'string' && value.trim()) modelByProvider[id] = value.trim();
+    });
+    applied.push('models');
+  } else if (typeof incoming.model === 'string' && incoming.model.trim()) {
+    modelByProvider.openrouter = incoming.model.trim(); // pre-provider export
+    applied.push('model');
   }
+  if (typeof incoming.provider === 'string' && providers.some(p => p.id === incoming.provider)) {
+    selectedProvider = incoming.provider;
+    applied.push('provider');
+  }
+  if (applied.includes('models') || applied.includes('model') || applied.includes('provider')) {
+    selectedModel = modelByProvider[selectedProvider] || selectedModel;
+    loadModels({ provider: selectedProvider, keepModel: true });
+  }
+  // Only adopt a key when one was really supplied, so importing an export that
+  // omits it cannot wipe a key already set up in this browser.
+  ['geminiApiKey', 'openrouterApiKey'].forEach((field) => {
+    if (typeof incoming[field] === 'string' && incoming[field].trim()) {
+      apiKeys[field.replace('ApiKey', '')] = incoming[field].trim();
+      applied.push(`${field.replace('ApiKey', '')} key`);
+    }
+  });
+  syncKeyCard();
 
   if (applied.length === 0) {
     transferStatus.textContent = 'No recognised settings in that JSON';
@@ -451,6 +725,8 @@ if (openOptionsButton) {
 
 exportButton.addEventListener('click', () => {
   transferJson.value = JSON.stringify({
+    provider: selectedProvider,
+    models: { ...modelByProvider, [selectedProvider]: selectedModel },
     autofillFields,
     resumeJson: resumeJson || DEFAULT_RESUME_JSON
   }, null, 2);

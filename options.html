@@ -7,11 +7,29 @@
 <body>
     <h1>Intelligent Autofill Settings</h1>
 
+    <section id="model-settings">
+        <h2>Provider &amp; Model</h2>
+        <label for="provider-select">Provider:</label>
+        <select id="provider-select"></select>
+        <p id="provider-blurb" class="model-meta"></p>
+
+        <label for="model-select">Model:</label>
+        <select id="model-select"></select>
+        <input type="text" id="model-custom" placeholder="model-id" autocomplete="off" spellcheck="false" size="50" hidden>
+        <p id="model-meta" class="model-meta">Loading models...</p>
+        <label class="checkline" id="free-only-line"><input type="checkbox" id="model-free-only"> Free models only</label>
+        <button id="refresh-models">Refresh List</button>
+        <button id="save-model">Save Provider &amp; Model</button>
+        <p id="model-status"></p>
+    </section>
+
     <section id="api-key-settings">
-        <h2>OpenRouter API Key</h2>
-        <label for="openrouter-api-key">API Key:</label>
-        <input type="password" id="openrouter-api-key" placeholder="sk-or-v1-..." size="50">
+        <h2>API Key</h2>
+        <p>Key for the provider selected above. Each provider's key is stored separately.</p>
+        <label for="api-key">API Key (<span id="api-provider-tag">Gemini</span>):</label>
+        <input type="password" id="api-key" placeholder="AIza..." size="50">
         <button id="save-api-key">Save API Key</button>
+        <a id="api-key-link" href="#" target="_blank" rel="noreferrer">Get a key</a>
         <p id="api-key-status"></p>
     </section>
 

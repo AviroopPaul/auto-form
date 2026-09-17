@@ -1,9 +1,9 @@
 // background.js
 console.log("Intelligent Autofill Extension: Background script loaded.");
 
-// The OpenRouter key normally comes from the extension settings. For local use you
-// can instead drop it in config.local.js (gitignored) via ./write-local-config.sh,
-// which reads OPENROUTER_API_KEY from your shell.
+// Provider keys normally come from the extension settings. For local use you can
+// instead drop them in config.local.js (gitignored) via ./write-local-config.sh,
+// which reads GEMINI_API_KEY / GOOGLE_API_KEY and OPENROUTER_API_KEY from your shell.
 // Safari runs this file as a background *page* (see "preferred_environment" in the
 // manifest), where importScripts does not exist, so each environment needs its own
 // loader. Either way a missing config.local.js is fine: the key then has to come
@@ -25,76 +25,363 @@ function loadLocalConfig() {
 
 loadLocalConfig();
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const OPENROUTER_MODEL = "minimax/minimax-m3:free";
 const OPENROUTER_REFERER = "https://github.com/AviroopPaul/auto-form";
 const OPENROUTER_TITLE = "Intelligent Autofill Extension";
-const OPENROUTER_KEY_ERROR = "Invalid API key format. Use your OpenRouter API key (starts with sk-or-).";
 
-function isValidOpenRouterKey(apiKey) {
-  return typeof apiKey === "string" && apiKey.startsWith("sk-or-");
+const MODEL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Both providers speak the OpenAI chat-completions dialect, so only the endpoint,
+// the key and the model-list shape differ. Gemini is the default because its free
+// tier is a real one: Flash models take a 1M-token input, where Groq's free tier
+// caps at 8K tokens *per minute* — less than a single autofill prompt — and
+// OpenRouter's shared free pool is where the 429s and dead model ids come from.
+const PROVIDERS = {
+  gemini: {
+    id: "gemini",
+    label: "Google Gemini",
+    blurb: "Free tier, no card required. 1M-token context on Flash models.",
+    chatUrl: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    // The OpenAI-compatible /models list omits context limits, so the native
+    // endpoint is used for the catalogue and the compatible one for chat.
+    modelsUrl: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000",
+    modelsAuth: "query",
+    keyField: "geminiApiKey",
+    keyHint: "AIza...",
+    keyUrl: "https://aistudio.google.com/apikey",
+    keyError: "Invalid API key format. Use your Google AI Studio key (starts with AIza).",
+    isValidKey: (key) => key.startsWith("AIza"),
+    defaultModel: "gemini-flash-lite-latest",
+    routeParams: false,
+    parseModels: parseGeminiModels,
+    sortModels: sortGemini,
+    fallbackModels: [
+      { id: "gemini-flash-lite-latest", name: "Gemini Flash-Lite Latest", free: true, json: true, context: 1048576 },
+      { id: "gemini-flash-latest", name: "Gemini Flash Latest", free: true, json: true, context: 1048576 },
+      { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", free: true, json: true, context: 1048576 }
+    ]
+  },
+  openrouter: {
+    id: "openrouter",
+    label: "OpenRouter",
+    blurb: "Hundreds of models behind one key. The shared free pool is rate-limited and flaky.",
+    chatUrl: "https://openrouter.ai/api/v1/chat/completions",
+    modelsUrl: "https://openrouter.ai/api/v1/models",
+    modelsAuth: "none", // the catalogue is public, so the key stays on the chat path
+    keyField: "openrouterApiKey",
+    keyHint: "sk-or-v1-...",
+    keyUrl: "https://openrouter.ai/keys",
+    keyError: "Invalid API key format. Use your OpenRouter API key (starts with sk-or-).",
+    isValidKey: (key) => key.startsWith("sk-or-"),
+    defaultModel: "nvidia/nemotron-3-super-120b-a12b:free",
+    routeParams: true,
+    parseModels: parseOpenRouterModels,
+    sortModels: sortByPrice,
+    fallbackModels: [
+      { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "NVIDIA: Nemotron 3 Super (free)", free: true, json: true, context: 262144, prompt: 0, completion: 0 },
+      { id: "google/gemma-4-31b-it:free", name: "Google: Gemma 4 31B (free)", free: true, json: true, context: 262144, prompt: 0, completion: 0 },
+      { id: "openai/gpt-oss-120b", name: "OpenAI: gpt-oss-120b", free: false, json: true, context: 131072, prompt: 0.037, completion: 0.17 }
+    ]
+  }
+};
+
+const DEFAULT_PROVIDER = "gemini";
+
+function getProvider(settings) {
+  const id = typeof settings.provider === "string" ? settings.provider : "";
+  return PROVIDERS[id] || PROVIDERS[DEFAULT_PROVIDER];
 }
 
-// Prefers a key that actually looks like an OpenRouter one, wherever it lives, so a
-// leftover Groq key in storage cannot shadow a good key in config.local.js.
-function getOpenRouterApiKey(settings) {
-  const candidates = [
-    settings.openrouterApiKey,
-    self.LOCAL_OPENROUTER_API_KEY,
-    settings.apiKey,
-    settings.openaiApiKey
-  ].filter(key => typeof key === "string" && key.trim());
-  return (candidates.find(isValidOpenRouterKey) || candidates[0] || "").trim();
+// Models are remembered per provider, so switching to Gemini and back does not
+// leave an OpenRouter id selected against Google's endpoint (or the reverse).
+function getSelectedModel(settings, provider) {
+  const byProvider = settings.models && typeof settings.models === "object" ? settings.models : {};
+  const stored = typeof byProvider[provider.id] === "string" ? byProvider[provider.id].trim() : "";
+  if (stored) return stored;
+  // Settings written before providers existed kept a single OpenRouter model id.
+  if (provider.id === "openrouter" && typeof settings.model === "string" && settings.model.trim()) {
+    return settings.model.trim();
+  }
+  return provider.defaultModel;
 }
 
-function openRouterHeaders(apiKey) {
-  return {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${apiKey}`,
-    "HTTP-Referer": OPENROUTER_REFERER,
-    "X-Title": OPENROUTER_TITLE
+// Prices come back as per-token strings; per-million is what the UI shows. A
+// negative price is OpenRouter's "varies by whichever model the router picks"
+// sentinel (openrouter/auto reports -1), not a real number, so it becomes null
+// rather than a nonsense figure that would sort ahead of everything free.
+function perMillion(price) {
+  const value = Number(price);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return value * 1e6;
+}
+
+// The extension sends text and needs text back, so anything that answers in audio
+// is filtered out of the picker entirely. Google's lyria models otherwise slip
+// through as "free" on a zero per-token price while being unusable here.
+function isTextModel(entry) {
+  const output = entry?.architecture?.output_modalities;
+  if (!Array.isArray(output)) return true; // undocumented: let it through
+  return output.includes("text") && !output.includes("audio");
+}
+
+function parseOpenRouterModels(body) {
+  const entries = Array.isArray(body?.data) ? body.data : [];
+  return entries.map((entry) => {
+    const id = entry && typeof entry.id === "string" ? entry.id : "";
+    if (!id || !isTextModel(entry)) return null;
+    const params = Array.isArray(entry.supported_parameters) ? entry.supported_parameters : [];
+    const pricing = entry.pricing || {};
+    const prompt = perMillion(pricing.prompt);
+    const completion = perMillion(pricing.completion);
+    return {
+      id,
+      name: typeof entry.name === "string" && entry.name ? entry.name : id,
+      free: prompt === 0 && completion === 0,
+      json: params.includes("response_format"),
+      context: Number(entry.context_length) || null,
+      prompt,
+      completion
+    };
+  }).filter(Boolean);
+}
+
+// Google's catalogue mixes in speech, image and embedding models that cannot answer
+// a chat completion, plus specialised agents (computer-use, robotics, deep-research)
+// that technically can but are the wrong shape and far too slow for filling a form.
+// generateContent support is the coarse filter; the id check removes the rest.
+const GEMINI_UNSUITABLE = /tts|image|embedding|banana|lyria|veo|imagen|aqa|transcribe|robotics|computer-use|antigravity|deep-research/i;
+
+function parseGeminiModels(body) {
+  const entries = Array.isArray(body?.models) ? body.models : [];
+  return entries.map((entry) => {
+    const id = String(entry?.name || "").replace(/^models\//, "");
+    const methods = Array.isArray(entry?.supportedGenerationMethods) ? entry.supportedGenerationMethods : [];
+    if (!id || GEMINI_UNSUITABLE.test(id) || !methods.includes("generateContent")) return null;
+    return {
+      id,
+      name: entry.displayName || id,
+      // Google's free tier covers the Gemini chat models; the per-model daily
+      // quota differs but none of them bill without a billing account attached.
+      free: true,
+      json: true,
+      context: Number(entry.inputTokenLimit) || null,
+      prompt: 0,
+      completion: 0
+    };
+  }).filter(Boolean);
+}
+
+// Free-then-cheapest is the natural order for a priced catalogue.
+function sortByPrice(a, b) {
+  if (a.free !== b.free) return a.free ? -1 : 1;
+  return (a.prompt ?? Infinity) - (b.prompt ?? Infinity) || a.id.localeCompare(b.id);
+}
+
+// Gemini ids carry no price to sort by (everything on the free tier is 0), so order
+// by usefulness for this task instead: the fast Flash-Lite tier first, then Flash,
+// then Pro, newest version leading each group. The evergreen "-latest" aliases lead
+// their family because they track the current release and never get retired.
+function sortGemini(a, b) {
+  const key = (id) => {
+    const family = /flash-lite/.test(id) ? 0 : /flash/.test(id) ? 1 : /pro/.test(id) ? 2 : 3;
+    const version = /-latest$/.test(id) ? Infinity : parseFloat((id.match(/-(\d+(?:\.\d+)?)-/) || [])[1]) || 0;
+    return [family, -version];
   };
+  const [fa, va] = key(a.id);
+  const [fb, vb] = key(b.id);
+  return fa - fb || va - vb || a.id.localeCompare(b.id);
 }
 
-// minimax-m3 accepts response_format, so JSON mode is on. Turn it off if the model is
-// swapped for one that rejects it (ling-3.0-flash-fin errors outright on response_format).
-// Note the provider honours it loosely and still fences its JSON sometimes, which is why
-// parseJsonContent below unwraps the response rather than trusting it to be bare JSON.
-const OPENROUTER_JSON_MODE = true;
+const cacheKeyFor = (provider) => `modelCatalog:${provider.id}`;
 
-function openRouterBody(messages) {
+function readCachedModels(provider) {
+  const key = cacheKeyFor(provider);
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.get(key, (data) => {
+        if (chrome.runtime.lastError) return resolve(null);
+        const cached = data && data[key];
+        resolve(cached && Array.isArray(cached.models) && cached.models.length ? cached : null);
+      });
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+function writeCachedModels(provider, payload) {
+  return new Promise((resolve) => {
+    try {
+      chrome.storage.local.set({ [cacheKeyFor(provider)]: payload }, () => {
+        void chrome.runtime.lastError;
+        resolve();
+      });
+    } catch (_) {
+      resolve();
+    }
+  });
+}
+
+// Returns the freshest list it can get, and always returns something: a live fetch
+// when possible, otherwise the cache (even a stale one), otherwise the seed list.
+// `error` is set whenever the caller is looking at something other than fresh data.
+async function getModelCatalog(provider, { refresh = false, apiKey = "" } = {}) {
+  const cached = await readCachedModels(provider);
+  const isFresh = cached && Date.now() - (cached.fetchedAt || 0) < MODEL_CACHE_TTL_MS;
+  if (cached && isFresh && !refresh) {
+    return { models: cached.models, fetchedAt: cached.fetchedAt, stale: false };
+  }
+
+  try {
+    // Gemini's catalogue is per-key, so without one there is nothing to fetch.
+    if (provider.modelsAuth === "query" && !apiKey) {
+      throw new Error("Add an API key to load the model list");
+    }
+    const url = provider.modelsAuth === "query"
+      ? `${provider.modelsUrl}&key=${encodeURIComponent(apiKey)}`
+      : provider.modelsUrl;
+
+    const response = await fetch(url, { headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+      const detail = await readErrorText(response);
+      throw new Error(`${response.status} ${response.statusText}`.trim() + (detail ? ` - ${detail}` : ""));
+    }
+    const models = provider.parseModels(await response.json()).sort(provider.sortModels);
+    if (models.length === 0) throw new Error("Empty model list");
+    const payload = { models, fetchedAt: Date.now() };
+    await writeCachedModels(provider, payload);
+    return { models, fetchedAt: payload.fetchedAt, stale: false };
+  } catch (error) {
+    console.warn(`Could not refresh the ${provider.label} model list:`, error);
+    const message = String(error.message || error);
+    if (cached) {
+      return { models: cached.models, fetchedAt: cached.fetchedAt, stale: true, error: message };
+    }
+    return { models: provider.fallbackModels, fetchedAt: null, stale: true, error: message };
+  }
+}
+
+// Reads JSON-mode support off the cache only: autofill must not wait on a catalogue
+// fetch, and an unknown model is assumed to accept response_format because most do
+// and fetchChatCompletion retries without it when one turns out not to.
+async function modelSupportsJsonMode(provider, modelId) {
+  const cached = await readCachedModels(provider);
+  const list = (cached && cached.models) || provider.fallbackModels;
+  const known = list.find(m => m.id === modelId);
+  return known ? known.json : true;
+}
+
+function isValidKey(provider, apiKey) {
+  return typeof apiKey === "string" && provider.isValidKey(apiKey.trim());
+}
+
+// Prefers a key that actually looks right for the chosen provider, wherever it
+// lives, so a leftover key for another provider cannot shadow a good one in
+// config.local.js or in the other provider's field.
+function getApiKey(settings, provider) {
+  const local = provider.id === "openrouter" ? self.LOCAL_OPENROUTER_API_KEY : self.LOCAL_GEMINI_API_KEY;
+  const candidates = [
+    settings[provider.keyField],
+    local,
+    settings.apiKey
+  ].filter(key => typeof key === "string" && key.trim());
+  return (candidates.find(key => isValidKey(provider, key)) || candidates[0] || "").trim();
+}
+
+function chatHeaders(provider, apiKey) {
+  const headers = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`
+  };
+  if (provider.id === "openrouter") {
+    headers["HTTP-Referer"] = OPENROUTER_REFERER;
+    headers["X-Title"] = OPENROUTER_TITLE;
+  }
+  return headers;
+}
+
+// JSON mode is per-model now that the model is user-selectable: most accept
+// response_format, but some reject it outright (inclusionai/ling-3.0-flash-fin
+// errors on it). Providers honour it loosely and still fence their JSON sometimes,
+// which is why parseJsonContent below unwraps the response rather than trusting it
+// to be bare JSON.
+function chatBody(provider, messages, model, jsonMode) {
   const body = {
-    model: OPENROUTER_MODEL,
+    model,
     messages,
     temperature: 0.1
   };
-  if (OPENROUTER_JSON_MODE) {
+  if (jsonMode) {
     body.response_format = { type: "json_object" };
-    // Only route to providers that actually honour the params we send. Without this,
-    // OpenRouter can pick a provider that ignores response_format or caps completions
-    // far below the model's advertised limit (SiliconFlow caps gpt-oss-120b at 8k).
-    body.provider = { require_parameters: true };
+    // OpenRouter only: route to upstreams that actually honour the params we send.
+    // Without it OpenRouter can pick one that ignores response_format or caps
+    // completions far below the advertised limit (SiliconFlow caps gpt-oss-120b at
+    // 8k). Google serves its own models, so the key is meaningless there and gets
+    // rejected as an unknown field.
+    if (provider.routeParams) body.provider = { require_parameters: true };
   }
   return body;
 }
 
+async function readErrorText(response) {
+  try {
+    const data = await response.json();
+    return data?.error?.message || JSON.stringify(data);
+  } catch (_) {
+    try {
+      return (await response.text()).slice(0, 200);
+    } catch (_) {
+      return "";
+    }
+  }
+}
+
 // The shared free-tier pool answers with a transient 429 fairly often, which would
-// otherwise surface as a failed autofill, so retry briefly before giving up.
-async function fetchOpenRouter(apiKey, messages) {
+// otherwise surface as a failed autofill, so retry briefly before giving up. The
+// error body is read here because the caller needs it and a body can only be read
+// once.
+async function postChatCompletion(provider, apiKey, messages, model, jsonMode) {
   const retryStatuses = [429, 502, 503];
   let response;
+  let errorText = "";
   for (let attempt = 0; attempt < 3; attempt++) {
-    response = await fetch(OPENROUTER_API_URL, {
+    response = await fetch(provider.chatUrl, {
       method: "POST",
-      headers: openRouterHeaders(apiKey),
-      body: JSON.stringify(openRouterBody(messages))
+      headers: chatHeaders(provider, apiKey),
+      body: JSON.stringify(chatBody(provider, messages, model, jsonMode))
     });
-    if (!retryStatuses.includes(response.status)) return response;
+    if (response.ok) return { response, errorText: "" };
+    errorText = await readErrorText(response);
+    if (!retryStatuses.includes(response.status)) break;
     if (attempt < 2) {
       await new Promise(resolve => setTimeout(resolve, 900 * (attempt + 1)));
     }
   }
-  return response;
+  return { response, errorText };
+}
+
+// A model can reject response_format even when the catalogue says otherwise, and a
+// custom model id is entirely unvetted, so a rejection is not a dead end: retry the
+// same call once with JSON mode off and let parseJsonContent unwrap the reply.
+function rejectsJsonMode(status, errorText) {
+  if (![400, 404, 422].includes(status)) return false;
+  return /response_format|json_object|json_schema|structured output/i.test(errorText || "");
+}
+
+async function fetchChatCompletion(provider, apiKey, messages, model) {
+  const jsonMode = await modelSupportsJsonMode(provider, model);
+  let { response, errorText } = await postChatCompletion(provider, apiKey, messages, model, jsonMode);
+
+  if (!response.ok && jsonMode && rejectsJsonMode(response.status, errorText)) {
+    console.warn(`${model} rejected JSON mode; retrying without response_format.`);
+    ({ response, errorText } = await postChatCompletion(provider, apiKey, messages, model, false));
+  }
+
+  if (!response.ok) {
+    const statusLine = `${response.status} ${response.statusText}`.trim();
+    throw new Error(`${provider.label} API error (${model}): ${statusLine}${errorText ? ` - ${errorText}` : ""}`);
+  }
+
+  return parseJsonContent(await response.json());
 }
 
 // Without JSON mode the model may fence its JSON or pad it with prose, so unwrap
@@ -248,7 +535,7 @@ function buildAutofillFieldsFromResume(resume) {
   return fields;
 }
 
-async function parseResumeTextToJson(resumeText, apiKey) {
+async function parseResumeTextToJson(resumeText, provider, apiKey, model) {
   const prompt = `Convert the following resume text into a clean, structured JSON object.
 
 Rules:
@@ -295,29 +582,10 @@ Rules:
 Resume text:
 ${resumeText}`;
 
-  const response = await fetchOpenRouter(apiKey, [
-        { role: "system", content: "You convert resume text into strict JSON following the given schema." },
-        { role: "user", content: prompt }
-      ]);
-
-  if (!response.ok) {
-    let errorBody = "";
-    try {
-      const errorData = await response.json();
-      errorBody = errorData?.error?.message || JSON.stringify(errorData);
-    } catch (_) {
-      try {
-        errorBody = (await response.text()).slice(0, 200);
-      } catch (_) {
-        errorBody = "";
-      }
-    }
-    const statusLine = `${response.status} ${response.statusText}`.trim();
-    throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
-  }
-
-  const data = await response.json();
-  return parseJsonContent(data);
+  return fetchChatCompletion(provider, apiKey, [
+    { role: "system", content: "You convert resume text into strict JSON following the given schema." },
+    { role: "user", content: prompt }
+  ], model);
 }
 
 // Listen for messages from content scripts or options page
@@ -325,7 +593,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === "deduceFormFields") {
       chrome.storage.sync.get("settings", async (data) => {
           const settings = data.settings || {};
-          const apiKey = getOpenRouterApiKey(settings);
+          const provider = getProvider(settings);
+          const apiKey = getApiKey(settings, provider);
           let autofillFields = settings.autofillFields || [];
           const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
           if (autofillFields.length === 0) {
@@ -344,14 +613,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           }
 
           if (!apiKey) {
-              console.warn("OpenRouter API Key is not set. Cannot deduce form fields.");
-              sendResponse({ error: "API Key not set", values: {} });
+              console.warn(`${provider.label} API key is not set. Cannot deduce form fields.`);
+              sendResponse({ error: `${provider.label} API key not set`, values: {} });
               return;
           }
-          if (!isValidOpenRouterKey(apiKey)) {
-              console.warn(OPENROUTER_KEY_ERROR);
+          if (!isValidKey(provider, apiKey)) {
+              console.warn(provider.keyError);
               sendResponse({
-                error: OPENROUTER_KEY_ERROR,
+                error: provider.keyError,
                 values: {}
               });
               return;
@@ -429,31 +698,11 @@ ${resumeJson}
 Empty Fields To Fill:
 ${JSON.stringify(emptyFields, null, 2)}`;
 
-          let response;
           try {
-              response = await fetchOpenRouter(apiKey, [
+              const llmResponse = await fetchChatCompletion(provider, apiKey, [
                           { role: "system", content: "You are an expert in web forms and can semantically map form fields to resume values." },
                           { role: "user", content: prompt }
-                      ]);
-
-              if (!response.ok) {
-                  let errorBody = "";
-                  try {
-                      const errorData = await response.json();
-                      errorBody = errorData?.error?.message || JSON.stringify(errorData);
-                  } catch (_) {
-                      try {
-                          errorBody = (await response.text()).slice(0, 200);
-                      } catch (_) {
-                          errorBody = "";
-                      }
-                  }
-                  const statusLine = `${response.status} ${response.statusText}`.trim();
-                  throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
-              }
-
-              const data = await response.json();
-              const llmResponse = parseJsonContent(data);
+                      ], getSelectedModel(settings, provider));
 
               // Support both {"values": {...}} and direct mapping fallback
               const rawValues = llmResponse.values && typeof llmResponse.values === "object"
@@ -496,7 +745,8 @@ ${JSON.stringify(emptyFields, null, 2)}`;
     } else if (request.action === "deduceFieldType") {
       chrome.storage.sync.get("settings", async (data) => {
           const settings = data.settings || {};
-          const apiKey = getOpenRouterApiKey(settings);
+          const provider = getProvider(settings);
+          const apiKey = getApiKey(settings, provider);
           let autofillFields = settings.autofillFields || [];
           const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
           if (autofillFields.length === 0) {
@@ -508,17 +758,17 @@ ${JSON.stringify(emptyFields, null, 2)}`;
             }
           }
           const htmlContext = request.htmlContext;
-  
+
           if (!apiKey) {
-              console.warn("OpenRouter API Key is not set. Cannot deduce field type.");
-              sendResponse({ inferredType: "text", suggestions: ["API Key not set"] });
+              console.warn(`${provider.label} API key is not set. Cannot deduce field type.`);
+              sendResponse({ inferredType: "text", suggestions: [`${provider.label} API key not set`] });
               return;
           }
-          if (!isValidOpenRouterKey(apiKey)) {
-              console.warn(OPENROUTER_KEY_ERROR);
+          if (!isValidKey(provider, apiKey)) {
+              console.warn(provider.keyError);
               sendResponse({
                 inferredType: "error",
-                suggestions: [OPENROUTER_KEY_ERROR]
+                suggestions: [provider.keyError]
               });
               return;
           }
@@ -549,32 +799,12 @@ Type attribute: ${htmlContext.type}
 Attributes: ${JSON.stringify(htmlContext.attributes)}
 Outer HTML: ${htmlContext.html}`;
   
-          let response;
           try {
-              response = await fetchOpenRouter(apiKey, [
+              const llmResponse = await fetchChatCompletion(provider, apiKey, [
                           { role: "system", content: "You are an expert in web forms and can semantically identify form field types based on HTML context and map them to user-defined fields." },
                           { role: "user", content: prompt }
-                      ]);
-  
-              if (!response.ok) {
-                  let errorBody = "";
-                  try {
-                      const errorData = await response.json();
-                      errorBody = errorData?.error?.message || JSON.stringify(errorData);
-                  } catch (_) {
-                      try {
-                          errorBody = (await response.text()).slice(0, 200);
-                      } catch (_) {
-                          errorBody = "";
-                      }
-                  }
-                  const statusLine = `${response.status} ${response.statusText}`.trim();
-                  throw new Error(`OpenRouter API error: ${statusLine}${errorBody ? ` - ${errorBody}` : ""}`);
-              }
-  
-              const data = await response.json();
-              const llmResponse = parseJsonContent(data);
-              
+                      ], getSelectedModel(settings, provider));
+
               let suggestions = [];
               let finalType = "";
 
@@ -619,6 +849,32 @@ Outer HTML: ${htmlContext.html}`;
         sendResponse({ settings: data.settings });
       });
       return true; // Indicate that sendResponse will be called asynchronously
+    } else if (request.action === "getModels") {
+      chrome.storage.sync.get("settings", async (data) => {
+        const settings = data.settings || {};
+        // The panel asks for a specific provider while the user is switching, before
+        // that choice has been saved; otherwise the stored one is authoritative.
+        const provider = PROVIDERS[request.provider] || getProvider(settings);
+        const catalog = await getModelCatalog(provider, {
+          refresh: request.refresh === true,
+          apiKey: getApiKey(settings, provider)
+        });
+        sendResponse({
+          provider: provider.id,
+          providers: Object.values(PROVIDERS).map(p => ({
+            id: p.id, label: p.label, blurb: p.blurb, keyHint: p.keyHint,
+            keyUrl: p.keyUrl, keyField: p.keyField
+          })),
+          models: catalog.models,
+          fetchedAt: catalog.fetchedAt,
+          stale: catalog.stale,
+          error: catalog.error,
+          selected: getSelectedModel(settings, provider),
+          defaultModel: provider.defaultModel,
+          hasKey: !!getApiKey(settings, provider)
+        });
+      });
+      return true; // Indicate that sendResponse will be called asynchronously
     } else if (request.action === "parseResume") {
       const resumeText = request.resumeText || "";
       if (!resumeText.trim()) {
@@ -628,17 +884,19 @@ Outer HTML: ${htmlContext.html}`;
       chrome.storage.sync.get("settings", async (data) => {
         try {
           const settings = data.settings || {};
-          const apiKey = getOpenRouterApiKey(settings);
+          const provider = getProvider(settings);
+          const apiKey = getApiKey(settings, provider);
           if (!apiKey) {
-            sendResponse({ error: "API Key not set" });
+            sendResponse({ error: `${provider.label} API key not set` });
             return;
           }
-          if (!isValidOpenRouterKey(apiKey)) {
-            sendResponse({ error: OPENROUTER_KEY_ERROR });
+          if (!isValidKey(provider, apiKey)) {
+            sendResponse({ error: provider.keyError });
             return;
           }
 
-          const parsedResume = await parseResumeTextToJson(resumeText, apiKey);
+          const parsedResume = await parseResumeTextToJson(
+            resumeText, provider, apiKey, getSelectedModel(settings, provider));
           const resumeJson = JSON.stringify(parsedResume, null, 2);
           const autofillFields = buildAutofillFieldsFromResume(parsedResume);
           sendResponse({ resumeJson, autofillFields });
