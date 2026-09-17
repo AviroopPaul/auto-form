@@ -2,10 +2,25 @@
 <html>
 <head>
     <title>Intelligent Autofill Settings</title>
+    <!-- Ahead of the stylesheet and outside the body on purpose: it stamps the
+         theme attribute on <html> synchronously, so a dark page opens dark
+         instead of flashing the light palette first. -->
+    <script src="theme.js"></script>
     <link rel="stylesheet" href="options.css">
 </head>
 <body>
     <h1>Intelligent Autofill Settings</h1>
+
+    <section id="appearance-settings">
+        <h2>Appearance</h2>
+        <label for="theme-select">Theme:</label>
+        <select id="theme-select">
+            <option value="auto">Match system</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+        </select>
+        <p>Applies to this page and the side panel. Stored per browser, so it is left out of Export and untouched by Import.</p>
+    </section>
 
     <section id="model-settings">
         <h2>Provider &amp; Model</h2>

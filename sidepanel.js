@@ -702,6 +702,33 @@ function importSettingsJson(raw) {
 
 autofillButton.addEventListener('click', triggerAutofill);
 
+// Cycles match system -> light -> dark. Three states rather than a binary switch
+// because "match system" is the useful default and there is no way back to it
+// once a two-way toggle has been touched. theme.js owns the storage and the root
+// attribute; this only has to repaint the button.
+const themeToggle = document.getElementById('theme-toggle');
+
+function renderThemeToggle() {
+  if (!themeToggle || !window.AutofillTheme) return;
+  const mode = window.AutofillTheme.get();
+  const label = window.AutofillTheme.labels[mode];
+  themeToggle.setAttribute('aria-label', label);
+  themeToggle.title = `${label} (click to change)`;
+  themeToggle.querySelectorAll('[data-theme-icon]').forEach((icon) => {
+    icon.hidden = icon.dataset.themeIcon !== mode;
+  });
+}
+
+if (themeToggle && window.AutofillTheme) {
+  themeToggle.addEventListener('click', () => {
+    window.AutofillTheme.cycle();
+    renderThemeToggle();
+  });
+  // Fires when the options page changes the theme while this panel is open.
+  document.documentElement.addEventListener('themechange', renderThemeToggle);
+  renderThemeToggle();
+}
+
 // A popup is a cramped place to manage nineteen fields, so offer the options page
 // as the roomy version. openOptionsPage is the right call because it reuses an
 // already-open options tab instead of piling up duplicates; opening the URL

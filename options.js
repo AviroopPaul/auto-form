@@ -23,6 +23,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveModelButton = document.getElementById('save-model');
     const modelStatus = document.getElementById('model-status');
 
+    // theme.js owns the stored value and the root attribute; the picker only has
+    // to stay in step with it. The themechange listener matters because the side
+    // panel can be open alongside this page and change the theme from there.
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect && window.AutofillTheme) {
+        themeSelect.value = window.AutofillTheme.get();
+        themeSelect.addEventListener('change', () => {
+            window.AutofillTheme.set(themeSelect.value);
+        });
+        document.documentElement.addEventListener('themechange', () => {
+            themeSelect.value = window.AutofillTheme.get();
+        });
+    }
+
     let autofillFields = []; // { fieldName: "Name", values: ["John Doe", "Jane Smith"] }
 
     // Held separately from the controls so a save fired before the catalogue loads

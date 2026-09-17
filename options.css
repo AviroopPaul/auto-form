@@ -1,20 +1,95 @@
+/* Light is the base palette; the dark blocks below restate these values and
+   nothing else. The :not() guard is what lets an explicit "light" choice beat a
+   dark system, so the picker works in both directions. */
+:root {
+    color-scheme: light;
+    --bg: #f4f4f4;
+    --ink: #333333;
+    --muted: #666666;
+    --meta: #555555;
+    --heading: #0056b3;
+    --panel: #ffffff;
+    --panel-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    --border: #dddddd;
+    --input: #ffffff;
+    --field: #f9f9f9;
+    --field-border: #e0e0e0;
+    --primary: #007bff;
+    --primary-hover: #0056b3;
+    --primary-ink: #ffffff;
+    --danger: #dc3545;
+    --danger-hover: #c82333;
+    --ok: #128a3c;
+    --warn: #b45309;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #12161d;
+        --ink: #dfe4ec;
+        --muted: #9aa5b5;
+        --meta: #aeb8c6;
+        --heading: #6aa9ff;
+        --panel: #1b212b;
+        --panel-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+        --border: #333c4a;
+        --input: #10151c;
+        --field: #161c25;
+        --field-border: #2c3441;
+        --primary: #2f7fe0;
+        --primary-hover: #4c96f0;
+        --primary-ink: #f2f7ff;
+        --danger: #d9515f;
+        --danger-hover: #ec6b78;
+        --ok: #4ade80;
+        --warn: #fbbf24;
+    }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12161d;
+    --ink: #dfe4ec;
+    --muted: #9aa5b5;
+    --meta: #aeb8c6;
+    --heading: #6aa9ff;
+    --panel: #1b212b;
+    --panel-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+    --border: #333c4a;
+    --input: #10151c;
+    --field: #161c25;
+    --field-border: #2c3441;
+    --primary: #2f7fe0;
+    --primary-hover: #4c96f0;
+    --primary-ink: #f2f7ff;
+    --danger: #d9515f;
+    --danger-hover: #ec6b78;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
 body {
     font-family: sans-serif;
     margin: 20px;
-    background-color: #f4f4f4;
-    color: #333;
+    background-color: var(--bg);
+    color: var(--ink);
 }
 
 h1, h2 {
-    color: #0056b3;
+    color: var(--heading);
 }
 
 section {
-    background-color: #fff;
+    background-color: var(--panel);
     padding: 20px;
     margin-bottom: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-shadow: var(--panel-shadow);
 }
 
 label {
@@ -30,13 +105,27 @@ textarea {
     width: calc(100% - 22px);
     padding: 10px;
     margin-bottom: 10px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--border);
     border-radius: 4px;
+    background-color: var(--input);
+    color: var(--ink);
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--muted);
 }
 
 select {
-    background-color: #fff;
+    background-color: var(--input);
     cursor: pointer;
+}
+
+/* The open dropdown is painted by the OS, not by this stylesheet, and only
+   follows the page once the option rows are told what to sit on. */
+option {
+    background-color: var(--panel);
+    color: var(--ink);
 }
 
 [hidden] {
@@ -49,8 +138,8 @@ textarea {
 }
 
 button {
-    background-color: #007bff;
-    color: white;
+    background-color: var(--primary);
+    color: var(--primary-ink);
     padding: 10px 15px;
     border: none;
     border-radius: 4px;
@@ -61,33 +150,37 @@ button {
 }
 
 button:hover {
-    background-color: #0056b3;
+    background-color: var(--primary-hover);
 }
 
 button.remove-field {
-    background-color: #dc3545;
+    background-color: var(--danger);
 }
 
 button.remove-field:hover {
-    background-color: #c82333;
+    background-color: var(--danger-hover);
+}
+
+a {
+    color: var(--heading);
 }
 
 .autofill-field {
-    border: 1px solid #e0e0e0;
+    border: 1px solid var(--field-border);
     padding: 15px;
     margin-bottom: 15px;
     border-radius: 6px;
-    background-color: #f9f9f9;
+    background-color: var(--field);
 }
 
 p {
     margin-top: 10px;
     font-style: italic;
-    color: #666;
+    color: var(--muted);
 }
 
 #api-key-status, #autofill-fields-status, #model-status {
-    color: green;
+    color: var(--ok);
     font-weight: bold;
 }
 
@@ -95,11 +188,11 @@ p {
    whether it is in the fetched catalogue at all. */
 .model-meta {
     font-style: normal;
-    color: #555;
+    color: var(--meta);
 }
 
 .model-meta.is-custom {
-    color: #b45309;
+    color: var(--warn);
 }
 
 .checkline {
@@ -115,4 +208,9 @@ p {
     margin: 0;
 }
 
-
+/* The theme picker is a short control in a page of full-width ones, so it opts
+   out of the shared width rule rather than stretching across the section. */
+#theme-select {
+    width: auto;
+    min-width: 220px;
+}

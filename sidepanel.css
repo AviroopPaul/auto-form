@@ -1,5 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600&family=Manrope:wght@400;600;700&display=swap");
 
+/* Light is the base palette. Every colour the panel uses is a token here, so the
+   dark blocks further down only have to restate values, never rules. */
 :root {
   color-scheme: light;
   --ink: #111827;
@@ -7,11 +9,139 @@
   --muted: #6b7280;
   --accent: #0f766e;
   --accent-strong: #115e59;
+  --accent-line: rgba(15, 118, 110, 0.4);
+  --accent-tint: rgba(15, 118, 110, 0.12);
+  --accent-tint-soft: rgba(15, 118, 110, 0.05);
   --glow: rgba(15, 118, 110, 0.2);
   --paper: #fdfbf7;
   --paper-2: #fff7ed;
   --border: rgba(15, 23, 42, 0.12);
   --shadow: 0 18px 40px rgba(15, 23, 42, 0.12);
+
+  /* Panel surfaces, in rising opacity: the tab rail and header buttons sit on
+     --surface-soft, cards on --surface, and a hovered control lifts to
+     --surface-strong. */
+  --surface-soft: rgba(255, 255, 255, 0.7);
+  --surface: rgba(255, 255, 255, 0.88);
+  --surface-strong: #ffffff;
+  --field: rgba(248, 250, 252, 0.8);
+  --field-border: rgba(148, 163, 184, 0.3);
+  --input: rgba(255, 255, 255, 0.9);
+
+  --halo-1: rgba(14, 116, 144, 0.12);
+  --halo-2: rgba(251, 191, 36, 0.16);
+  --action-card: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.9));
+  --action-card-border: rgba(251, 191, 36, 0.3);
+  --mark: linear-gradient(135deg, #111827, #1f2937);
+
+  --idle: #94a3b8;
+  --idle-halo: rgba(148, 163, 184, 0.2);
+  --good: #10b981;
+  --good-halo: rgba(16, 185, 129, 0.2);
+  --bad: #ef4444;
+  --bad-halo: rgba(239, 68, 68, 0.2);
+  --warn: #b45309;
+
+  --primary-fill: linear-gradient(135deg, #0f766e, #0d9488);
+  --primary-ink: #ecfeff;
+  --primary-shadow: 0 14px 26px rgba(15, 118, 110, 0.25);
+  --primary-shadow-hover: 0 18px 30px rgba(15, 118, 110, 0.3);
+}
+
+/* Dark, twice over: once for a system that asks for it, once for the toggle. The
+   :not() guard is what lets an explicit "light" beat a dark system. Teal has to
+   climb to the 300/400 range to stay legible on slate, and the paper warmth
+   becomes a cool near-black so the accent still reads as the only warm thing. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ink: #e8edf5;
+    --ink-soft: #cbd5e1;
+    --muted: #94a3b8;
+    --accent: #2dd4bf;
+    --accent-strong: #5eead4;
+    --accent-line: rgba(45, 212, 191, 0.42);
+    --accent-tint: rgba(45, 212, 191, 0.16);
+    --accent-tint-soft: rgba(45, 212, 191, 0.08);
+    --glow: rgba(45, 212, 191, 0.22);
+    --paper: #0b1220;
+    --paper-2: #131c2e;
+    --border: rgba(148, 163, 184, 0.18);
+    --shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+
+    --surface-soft: rgba(30, 41, 59, 0.6);
+    --surface: rgba(30, 41, 59, 0.72);
+    --surface-strong: #243044;
+    --field: rgba(15, 23, 42, 0.6);
+    --field-border: rgba(148, 163, 184, 0.22);
+    --input: rgba(15, 23, 42, 0.7);
+
+    --halo-1: rgba(45, 212, 191, 0.12);
+    --halo-2: rgba(251, 191, 36, 0.08);
+    --action-card: linear-gradient(180deg, rgba(30, 41, 59, 0.85), rgba(19, 28, 46, 0.85));
+    --action-card-border: rgba(251, 191, 36, 0.22);
+    --mark: linear-gradient(135deg, #1e293b, #334155);
+
+    --idle: #64748b;
+    --idle-halo: rgba(100, 116, 139, 0.25);
+    --good: #34d399;
+    --good-halo: rgba(52, 211, 153, 0.2);
+    --bad: #f87171;
+    --bad-halo: rgba(248, 113, 113, 0.2);
+    --warn: #fbbf24;
+
+    --primary-fill: linear-gradient(135deg, #0d9488, #14b8a6);
+    --primary-ink: #04201d;
+    --primary-shadow: 0 14px 26px rgba(0, 0, 0, 0.45);
+    --primary-shadow-hover: 0 18px 30px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ink: #e8edf5;
+  --ink-soft: #cbd5e1;
+  --muted: #94a3b8;
+  --accent: #2dd4bf;
+  --accent-strong: #5eead4;
+  --accent-line: rgba(45, 212, 191, 0.42);
+  --accent-tint: rgba(45, 212, 191, 0.16);
+  --accent-tint-soft: rgba(45, 212, 191, 0.08);
+  --glow: rgba(45, 212, 191, 0.22);
+  --paper: #0b1220;
+  --paper-2: #131c2e;
+  --border: rgba(148, 163, 184, 0.18);
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+
+  --surface-soft: rgba(30, 41, 59, 0.6);
+  --surface: rgba(30, 41, 59, 0.72);
+  --surface-strong: #243044;
+  --field: rgba(15, 23, 42, 0.6);
+  --field-border: rgba(148, 163, 184, 0.22);
+  --input: rgba(15, 23, 42, 0.7);
+
+  --halo-1: rgba(45, 212, 191, 0.12);
+  --halo-2: rgba(251, 191, 36, 0.08);
+  --action-card: linear-gradient(180deg, rgba(30, 41, 59, 0.85), rgba(19, 28, 46, 0.85));
+  --action-card-border: rgba(251, 191, 36, 0.22);
+  --mark: linear-gradient(135deg, #1e293b, #334155);
+
+  --idle: #64748b;
+  --idle-halo: rgba(100, 116, 139, 0.25);
+  --good: #34d399;
+  --good-halo: rgba(52, 211, 153, 0.2);
+  --bad: #f87171;
+  --bad-halo: rgba(248, 113, 113, 0.2);
+  --warn: #fbbf24;
+
+  --primary-fill: linear-gradient(135deg, #0d9488, #14b8a6);
+  --primary-ink: #04201d;
+  --primary-shadow: 0 14px 26px rgba(0, 0, 0, 0.45);
+  --primary-shadow-hover: 0 18px 30px rgba(0, 0, 0, 0.55);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
 * {
@@ -21,8 +151,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: radial-gradient(circle at top, rgba(14, 116, 144, 0.12), transparent 40%),
-    radial-gradient(circle at 10% 20%, rgba(251, 191, 36, 0.16), transparent 45%),
+  background: radial-gradient(circle at top, var(--halo-1), transparent 40%),
+    radial-gradient(circle at 10% 20%, var(--halo-2), transparent 45%),
     var(--paper);
   color: var(--ink);
   font-family: "Manrope", "Helvetica Neue", sans-serif;
@@ -38,7 +168,7 @@ body {
 .tabs {
   display: flex;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-soft);
   border-radius: 16px;
   padding: 6px;
   border: 1px solid var(--border);
@@ -58,9 +188,9 @@ body {
 }
 
 .tab.is-active {
-  background: rgba(15, 118, 110, 0.12);
+  background: var(--accent-tint);
   color: var(--accent-strong);
-  box-shadow: inset 0 0 0 1px rgba(15, 118, 110, 0.2);
+  box-shadow: inset 0 0 0 1px var(--glow);
 }
 
 .view {
@@ -80,11 +210,15 @@ body {
   align-items: center;
 }
 
-/* Opens the options page, where there is room to manage a long field list. Sits
-   at the top of the header so it reads as a window control rather than part of
-   the copy. */
-.hero-action {
+/* Theme toggle and the options link, paired at the top of the header so they read
+   as window controls rather than part of the copy. */
+.hero-actions {
   align-self: start;
+  display: flex;
+  gap: 6px;
+}
+
+.hero-action {
   height: 28px;
   width: 28px;
   padding: 0;
@@ -92,7 +226,7 @@ body {
   place-items: center;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-soft);
   color: var(--muted);
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
@@ -100,8 +234,8 @@ body {
 
 .hero-action:hover {
   color: var(--accent-strong);
-  border-color: rgba(15, 118, 110, 0.4);
-  background: #fff;
+  border-color: var(--accent-line);
+  background: var(--surface-strong);
 }
 
 .hero-action:focus-visible {
@@ -109,6 +243,9 @@ body {
   outline-offset: 2px;
 }
 
+/* The toggle holds three of these, one per mode; sidepanel.js unhides the one
+   matching the current theme, so the button always pictures the state you are
+   in. Hiding is the shared [hidden] rule further down. */
 .hero-action svg {
   width: 14px;
   height: 14px;
@@ -123,7 +260,7 @@ body {
   height: 52px;
   width: 52px;
   border-radius: 16px;
-  background: linear-gradient(135deg, #111827, #1f2937);
+  background: var(--mark);
   display: grid;
   place-items: center;
   box-shadow: 0 12px 20px rgba(17, 24, 39, 0.3);
@@ -151,8 +288,8 @@ body {
 .action-card {
   border-radius: 18px;
   padding: 16px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.9));
-  border: 1px solid rgba(251, 191, 36, 0.3);
+  background: var(--action-card);
+  border: 1px solid var(--action-card-border);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -170,8 +307,8 @@ body {
   height: 10px;
   width: 10px;
   border-radius: 999px;
-  background: #94a3b8;
-  box-shadow: 0 0 0 5px rgba(148, 163, 184, 0.2);
+  background: var(--idle);
+  box-shadow: 0 0 0 5px var(--idle-halo);
 }
 
 .status-title {
@@ -191,31 +328,31 @@ body {
 }
 
 .status.done .status-dot {
-  background: #10b981;
-  box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.2);
+  background: var(--good);
+  box-shadow: 0 0 0 8px var(--good-halo);
 }
 
 .status.error .status-dot {
-  background: #ef4444;
-  box-shadow: 0 0 0 8px rgba(239, 68, 68, 0.2);
+  background: var(--bad);
+  box-shadow: 0 0 0 8px var(--bad-halo);
 }
 
 .primary {
   border: none;
   border-radius: 14px;
   padding: 12px 14px;
-  background: linear-gradient(135deg, #0f766e, #0d9488);
-  color: #ecfeff;
+  background: var(--primary-fill);
+  color: var(--primary-ink);
   font-weight: 700;
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
-  box-shadow: 0 14px 26px rgba(15, 118, 110, 0.25);
+  box-shadow: var(--primary-shadow);
 }
 
 .primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 18px 30px rgba(15, 118, 110, 0.3);
+  box-shadow: var(--primary-shadow-hover);
 }
 
 .primary:disabled {
@@ -230,7 +367,7 @@ body {
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--surface);
   border-radius: 18px;
   padding: 14px;
   border: 1px solid var(--border);
@@ -255,7 +392,7 @@ body {
 .tag {
   padding: 4px 8px;
   border-radius: 999px;
-  background: rgba(15, 118, 110, 0.12);
+  background: var(--accent-tint);
   color: var(--accent-strong);
   font-size: 10px;
   font-weight: 600;
@@ -271,11 +408,11 @@ body {
 
 .upload {
   position: relative;
-  border: 1px dashed rgba(15, 118, 110, 0.4);
+  border: 1px dashed var(--accent-line);
   border-radius: 12px;
   padding: 14px;
   text-align: center;
-  background: rgba(15, 118, 110, 0.05);
+  background: var(--accent-tint-soft);
 }
 
 .upload input {
@@ -301,7 +438,12 @@ input[type="text"] {
   font-family: "Manrope", "Helvetica Neue", sans-serif;
   font-size: 12px;
   color: var(--ink);
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--input);
+}
+
+textarea::placeholder,
+input::placeholder {
+  color: var(--muted);
 }
 
 /* The model list runs to a few hundred entries, so the closed control has to stay
@@ -311,6 +453,13 @@ select {
   max-width: 100%;
   cursor: pointer;
   text-overflow: ellipsis;
+}
+
+/* The dropdown itself is painted by the OS, not by this stylesheet, and it only
+   follows the page when the option rows are told what to sit on. */
+option {
+  background: var(--paper);
+  color: var(--ink);
 }
 
 [hidden] {
@@ -329,8 +478,12 @@ textarea {
   gap: 10px;
 }
 
+a {
+  color: var(--accent-strong);
+}
+
 .ghost {
-  border: 1px solid rgba(15, 118, 110, 0.4);
+  border: 1px solid var(--accent-line);
   background: transparent;
   color: var(--accent-strong);
   border-radius: 12px;
@@ -354,7 +507,7 @@ textarea {
 }
 
 .model-meta.is-custom {
-  color: #b45309;
+  color: var(--warn);
 }
 
 .checkline {
@@ -380,8 +533,8 @@ textarea {
 .field-item {
   padding: 10px;
   border-radius: 12px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
-  background: rgba(248, 250, 252, 0.8);
+  border: 1px solid var(--field-border);
+  background: var(--field);
   display: grid;
   gap: 6px;
 }
@@ -400,7 +553,7 @@ textarea {
 .remove {
   border: none;
   background: transparent;
-  color: #ef4444;
+  color: var(--bad);
   font-size: 11px;
   cursor: pointer;
 }
