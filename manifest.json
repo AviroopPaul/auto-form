@@ -3,6 +3,11 @@
   "name": "Intelligent Autofill Extension",
   "version": "1.0",
   "description": "Intelligently autofill forms using LLM-powered label deduction and user-defined values.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": [
     "storage",
     "activeTab",
@@ -13,7 +18,11 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": [
+      "background.js"
+    ],
+    "preferred_environment": "document"
   },
   "content_scripts": [
     {
@@ -30,6 +39,7 @@
     }
   ],
   "action": {
+    "default_popup": "sidepanel.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -42,7 +52,9 @@
   "options_page": "options.html",
   "commands": {
     "autofill": {
-      "suggested_key": "Ctrl+Shift+F",
+      "suggested_key": {
+        "default": "Ctrl+Shift+F"
+      },
       "description": "Auto fill form"
     }
   },

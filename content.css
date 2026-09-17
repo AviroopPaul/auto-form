@@ -44,6 +44,27 @@
     background-color: #f0f0f0; /* Highlight on hover */
 }
 
+/* This sheet is injected into whatever page the user is on, so it follows the
+   browser's colour scheme rather than the theme picked inside the extension.
+   The picker is about the extension's own windows; a suggestion list floating
+   over someone's page should match the page it is floating over. The toast
+   below needs no dark variant, being dark already. */
+@media (prefers-color-scheme: dark) {
+    .autofill-extension-dropdown {
+        background: #1b212b;
+        border-color: #3a4250;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
+    }
+
+    .autofill-suggestion-item {
+        color: #dfe4ec;
+    }
+
+    .autofill-suggestion-item:hover {
+        background-color: #2a3240;
+    }
+}
+
 .autofill-extension-processing {
     position: fixed;
     right: 24px;

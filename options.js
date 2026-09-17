@@ -1,8 +1,13 @@
 // options.js
 document.addEventListener('DOMContentLoaded', () => {
-    const groqApiKeyInput = document.getElementById('groq-api-key');
+    const apiKeyInput = document.getElementById('api-key');
     const saveApiKeyButton = document.getElementById('save-api-key');
     const apiKeyStatus = document.getElementById('api-key-status');
+    const apiProviderTag = document.getElementById('api-provider-tag');
+    const apiKeyLink = document.getElementById('api-key-link');
+    const providerSelect = document.getElementById('provider-select');
+    const providerBlurb = document.getElementById('provider-blurb');
+    const freeOnlyLine = document.getElementById('free-only-line');
 
     const fieldsContainer = document.getElementById('fields-container');
     const addFieldButton = document.getElementById('add-field');
@@ -10,7 +15,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const autofillFieldsStatus = document.getElementById('autofill-fields-status');
     const resumeJsonInput = document.getElementById('resume-json');
 
+    const modelSelect = document.getElementById('model-select');
+    const modelCustom = document.getElementById('model-custom');
+    const modelMeta = document.getElementById('model-meta');
+    const modelFreeOnly = document.getElementById('model-free-only');
+    const refreshModelsButton = document.getElementById('refresh-models');
+    const saveModelButton = document.getElementById('save-model');
+    const modelStatus = document.getElementById('model-status');
+
+    // theme.js owns the stored value and the root attribute; the picker only has
+    // to stay in step with it. The themechange listener matters because the side
+    // panel can be open alongside this page and change the theme from there.
+    const themeSelect = document.getElementById('theme-select');
+    if (themeSelect && window.AutofillTheme) {
+        themeSelect.value = window.AutofillTheme.get();
+        themeSelect.addEventListener('change', () => {
+            window.AutofillTheme.set(themeSelect.value);
+        });
+        document.documentElement.addEventListener('themechange', () => {
+            themeSelect.value = window.AutofillTheme.get();
+        });
+    }
+
     let autofillFields = []; // { fieldName: "Name", values: ["John Doe", "Jane Smith"] }
+
+    // Held separately from the controls so a save fired before the catalogue loads
+    // cannot write an empty model id and quietly reset the choice to the default.
+    let selectedProvider = '';
+    let selectedModel = '';
+    let modelCatalog = [];
+    let providers = [];
+    let modelInitialized = false;
+
+    // Both are remembered per provider so switching does not lose the other key,
+    // or leave one provider's model id pointed at the other's endpoint.
+    const apiKeys = {};
+    const modelByProvider = {};
+
+    const CUSTOM_MODEL_OPTION = '__custom__';
+
+    function providerInfo(id) {
+        return providers.find(p => p.id === (id || selectedProvider)) || null;
+    }
 
     const DEFAULT_RESUME = {
         name: "Aviroop Paul",
@@ -141,13 +187,173 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function getSettingsPayload() {
-        const resumeJson = resumeJsonInput.value;
-        const groqApiKey = groqApiKeyInput.value;
+        if (selectedProvider) modelByProvider[selectedProvider] = selectedModel;
         return {
-            groqApiKey,
+            provider: selectedProvider,
+            models: { ...modelByProvider },
+            geminiApiKey: apiKeys.gemini || '',
+            openrouterApiKey: apiKeys.openrouter || '',
             autofillFields,
-            resumeJson
+            resumeJson: resumeJsonInput.value
         };
+    }
+
+    function renderProviderOptions() {
+        providerSelect.innerHTML = '';
+        providers.forEach((p) => {
+            const option = document.createElement('option');
+            option.value = p.id;
+            option.textContent = p.label;
+            providerSelect.appendChild(option);
+        });
+        providerSelect.value = selectedProvider;
+        providerBlurb.textContent = providerInfo()?.blurb || '';
+        syncKeyCard();
+    }
+
+    // The key field belongs to whichever provider is selected above, so it
+    // re-labels itself rather than showing one field per provider.
+    function syncKeyCard() {
+        const info = providerInfo();
+        if (!info) return;
+        apiProviderTag.textContent = info.label;
+        apiKeyInput.placeholder = info.keyHint;
+        apiKeyInput.value = apiKeys[info.id] || '';
+        apiKeyLink.href = info.keyUrl;
+        apiKeyLink.textContent = `Get a ${info.label} key`;
+    }
+
+    function formatContext(tokens) {
+        if (!tokens) return '';
+        if (tokens >= 1e6) return `${Math.round(tokens / 1e5) / 10}M`;
+        if (tokens >= 1e3) return `${Math.round(tokens / 1e3)}K`;
+        return String(tokens);
+    }
+
+    function formatPrice(perMillion) {
+        if (perMillion === null || perMillion === undefined) return '?';
+        if (perMillion === 0) return '$0';
+        if (perMillion >= 1) return `$${perMillion.toFixed(2)}`;
+        // Sub-dollar rates need a third decimal to stay distinguishable, but keep
+        // at least two so a rate never renders as "$0.1" next to a "$0.037".
+        return `$${perMillion.toFixed(3).replace(/(\.\d{2}\d*?)0+$/, '$1')}`;
+    }
+
+    function modelSummary(model) {
+        let price;
+        if (model.free) {
+            price = 'Free';
+        } else if (model.prompt === null || model.completion === null) {
+            // Routers such as openrouter/auto do not publish a fixed rate.
+            price = 'Variable pricing';
+        } else {
+            price = `${formatPrice(model.prompt)} in / ${formatPrice(model.completion)} out per 1M`;
+        }
+        const context = model.context ? ` · ${formatContext(model.context)} ctx` : '';
+        return `${price}${context}`;
+    }
+
+    // True for an id the fetched catalogue does not contain: either one typed by
+    // hand or one retired upstream. Either way it stays editable as free text
+    // rather than silently vanishing from the dropdown.
+    function isCustomModel() {
+        return !!selectedModel && !modelCatalog.some(m => m.id === selectedModel);
+    }
+
+    function renderModelOptions() {
+        let list = modelFreeOnly.checked ? modelCatalog.filter(m => m.free) : modelCatalog;
+
+        // Keep the current choice in the list even when the filter would hide it,
+        // otherwise "Free only" would silently reassign a paid selection.
+        const current = modelCatalog.find(m => m.id === selectedModel);
+        if (current && !list.includes(current)) list = [current, ...list];
+
+        modelSelect.innerHTML = '';
+        [
+            { label: 'Free', items: list.filter(m => m.free) },
+            { label: 'Paid', items: list.filter(m => !m.free) }
+        ].forEach(({ label, items }) => {
+            if (items.length === 0) return;
+            const group = document.createElement('optgroup');
+            group.label = label;
+            items.forEach((model) => {
+                const option = document.createElement('option');
+                option.value = model.id;
+                option.textContent = `${model.name} — ${modelSummary(model)}`;
+                group.appendChild(option);
+            });
+            modelSelect.appendChild(group);
+        });
+
+        const customOption = document.createElement('option');
+        customOption.value = CUSTOM_MODEL_OPTION;
+        customOption.textContent = 'Custom model id...';
+        modelSelect.appendChild(customOption);
+
+        syncModelControls();
+    }
+
+    function syncModelControls() {
+        const custom = isCustomModel();
+        modelSelect.value = custom ? CUSTOM_MODEL_OPTION : selectedModel;
+        modelCustom.hidden = !custom;
+        if (custom) modelCustom.value = selectedModel;
+        describeSelectedModel();
+    }
+
+    function describeSelectedModel() {
+        const id = selectedModel.trim();
+        const known = modelCatalog.find(m => m.id === id);
+
+        if (!id) {
+            modelMeta.classList.remove('is-custom');
+            modelMeta.textContent = 'No model chosen, so the built-in default is used.';
+            return;
+        }
+        if (!known) {
+            modelMeta.classList.add('is-custom');
+            modelMeta.textContent = modelCatalog.length
+                ? 'Custom: not in the fetched catalogue. It is sent to OpenRouter exactly as typed, so check the spelling.'
+                : 'Catalogue not loaded yet. It is sent to OpenRouter exactly as typed.';
+            return;
+        }
+        modelMeta.classList.remove('is-custom');
+        modelMeta.textContent = `${known.name} — ${modelSummary(known)}${known.json ? '' : ' · no JSON mode'}`;
+    }
+
+    function loadModels({ refresh = false, provider = null, keepModel = false } = {}) {
+        modelStatus.textContent = refresh ? 'Refreshing...' : 'Loading models...';
+        chrome.runtime.sendMessage({ action: 'getModels', refresh, provider }, (response) => {
+            if (!response) {
+                modelStatus.textContent = 'Could not load models';
+                return;
+            }
+            providers = Array.isArray(response.providers) ? response.providers : [];
+            selectedProvider = response.provider || selectedProvider;
+            modelCatalog = Array.isArray(response.models) ? response.models : [];
+
+            // The background resolves the effective model (saved value, else the
+            // provider default). `keepModel` is for a plain refresh, which must not
+            // discard a choice just made.
+            if (!modelInitialized || !keepModel) {
+                modelInitialized = true;
+                selectedModel = response.selected || response.defaultModel || '';
+            }
+
+            renderProviderOptions();
+            renderModelOptions();
+            freeOnlyLine.hidden = modelCatalog.every(m => m.free);
+
+            if (!response.hasKey) {
+                modelStatus.textContent = 'Add an API key below to load the model list';
+            } else if (response.stale) {
+                modelStatus.textContent = response.fetchedAt
+                    ? `Showing the list cached ${new Date(response.fetchedAt).toLocaleDateString()}`
+                    : `Could not reach ${providerInfo()?.label || 'the provider'}, showing a built-in list`;
+            } else {
+                modelStatus.textContent = `${modelCatalog.length} models loaded`;
+            }
+        });
     }
 
     function renderAutofillFields() {
@@ -170,7 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
     function loadSettings() {
         chrome.runtime.sendMessage({ action: "getSettings" }, (response) => {
             const settings = (response && response.settings) ? response.settings : {};
-            groqApiKeyInput.value = settings.groqApiKey || settings.openaiApiKey || '';
+            apiKeys.gemini = settings.geminiApiKey || '';
+            apiKeys.openrouter = settings.openrouterApiKey || '';
+            Object.assign(modelByProvider, settings.models || {});
             const resumeJson = settings.resumeJson || DEFAULT_RESUME_JSON;
             resumeJsonInput.value = resumeJson;
             if (settings.autofillFields && settings.autofillFields.length > 0) {
@@ -184,14 +392,64 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
             renderAutofillFields();
+            // Chained rather than parallel: the model list depends on which
+            // provider is stored and, for Gemini, on its key.
+            loadModels();
         });
     }
 
+    apiKeyInput.addEventListener('input', () => {
+        if (selectedProvider) apiKeys[selectedProvider] = apiKeyInput.value.trim();
+    });
+
     saveApiKeyButton.addEventListener('click', () => {
+        if (selectedProvider) apiKeys[selectedProvider] = apiKeyInput.value.trim();
         chrome.runtime.sendMessage({ action: "saveSettings", settings: getSettingsPayload() }, (response) => {
             if (response && response.success) {
                 apiKeyStatus.textContent = "API Key saved!";
                 setTimeout(() => apiKeyStatus.textContent = '', 3000);
+                // Gemini's catalogue is per-key, so a new key can unlock the list.
+                loadModels({ refresh: true, keepModel: true });
+            }
+        });
+    });
+
+    providerSelect.addEventListener('change', () => {
+        if (selectedProvider) modelByProvider[selectedProvider] = selectedModel;
+        selectedProvider = providerSelect.value;
+        modelCatalog = [];
+        syncKeyCard();
+        // Ask for the newly chosen provider explicitly: the change is not saved
+        // yet, so the background would answer for the previously stored one.
+        loadModels({ provider: selectedProvider });
+    });
+
+    modelSelect.addEventListener('change', () => {
+        if (modelSelect.value === CUSTOM_MODEL_OPTION) {
+            modelCustom.hidden = false;
+            selectedModel = modelCustom.value.trim();
+            modelCustom.focus();
+        } else {
+            modelCustom.hidden = true;
+            selectedModel = modelSelect.value;
+        }
+        describeSelectedModel();
+    });
+
+    modelCustom.addEventListener('input', () => {
+        selectedModel = modelCustom.value.trim();
+        describeSelectedModel();
+    });
+
+    modelFreeOnly.addEventListener('change', renderModelOptions);
+
+    refreshModelsButton.addEventListener('click', () => loadModels({ refresh: true, keepModel: true }));
+
+    saveModelButton.addEventListener('click', () => {
+        chrome.runtime.sendMessage({ action: "saveSettings", settings: getSettingsPayload() }, (response) => {
+            if (response && response.success) {
+                modelStatus.textContent = "Model saved!";
+                setTimeout(() => modelStatus.textContent = '', 3000);
             }
         });
     });
@@ -231,4 +489,5 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadSettings();
+    loadModels();
 });

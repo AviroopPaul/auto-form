@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Autofill Demo — Job Application</title>
+  <style>
+    :root {
+      --ink: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #0f766e;
+      --ok: #059669;
+      --bad: #dc2626;
+      --warn: #b45309;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 20px 80px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #f8fafc;
+      line-height: 1.5;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; }
+    header h1 { margin: 0 0 6px; font-size: 24px; }
+    header p { margin: 0 0 20px; color: var(--muted); font-size: 14px; }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 13px;
+    }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .chip {
+      display: inline-block;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .chip.fill  { background: #d1fae5; color: #065f46; }
+    .chip.empty { background: #fee2e2; color: #991b1b; }
+    .chip.keep  { background: #fef3c7; color: #92400e; }
+
+    fieldset {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin: 0 0 18px;
+      padding: 16px 18px 20px;
+      background: #fff;
+    }
+    legend { font-weight: 650; padding: 0 6px; font-size: 15px; }
+
+    .field { margin-top: 14px; }
+    .field > label, .field .label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .note { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+    input[type="text"], input[type="email"], input[type="tel"], input[type="url"],
+    input[type="date"], input[type="number"], select, textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 7px;
+      font: inherit;
+      font-size: 14px;
+      background: #fff;
+    }
+    textarea { min-height: 76px; resize: vertical; }
+    .check { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; }
+    .check input { width: auto; }
+
+    /* Results panel */
+    .results {
+      position: sticky;
+      bottom: 0;
+      margin-top: 24px;
+      padding: 14px 16px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 -4px 20px rgba(15, 23, 42, .08);
+    }
+    .results-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    button {
+      padding: 9px 16px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #64748b; }
+    #score { font-weight: 700; font-size: 15px; }
+    #detail { margin: 12px 0 0; padding: 0; list-style: none; font-size: 13px; max-height: 260px; overflow-y: auto; }
+    #detail li { display: flex; gap: 8px; padding: 4px 0; border-top: 1px solid #f1f5f9; }
+    #detail li:first-child { border-top: 0; }
+    .verdict { flex: 0 0 54px; font-weight: 700; }
+    .pass .verdict { color: var(--ok); }
+    .fail .verdict { color: var(--bad); }
+    .got { color: var(--muted); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Autofill Demo — Job Application</h1>
+    <p>
+      A form with no other named person on it, so the extension should fill it as the
+      primary user (the owner of the Resume JSON). Every field is tagged with what
+      should happen; press <strong>Check results</strong> after autofilling to score it.
+    </p>
+  </header>
+
+  <div class="legend">
+    <span><i class="chip fill">fill</i> should be filled from the resume</span>
+    <span><i class="chip empty">stay empty</i> nothing grounded exists, must NOT be invented</span>
+    <span><i class="chip keep">keep</i> already filled, must NOT be overwritten</span>
+  </div>
+
+  <form id="demo" autocomplete="off">
+    <fieldset>
+      <legend>Personal</legend>
+
+      <div class="field">
+        <label for="fullname">Full name <i class="chip fill">fill</i></label>
+        <input type="text" id="fullname" name="fullname" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="firstname">First name <i class="chip fill">fill</i></label>
+        <input type="text" id="firstname" name="firstname" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="lastname">Last name <i class="chip fill">fill</i></label>
+        <input type="text" id="lastname" name="lastname" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="email">Email address <i class="chip fill">fill</i></label>
+        <input type="email" id="email" name="email" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <!-- No <label>: the only clue is the placeholder. -->
+        <input type="tel" id="phone" name="phone" placeholder="Mobile phone number" data-expect="fill" />
+        <div class="note">Placeholder-only label <i class="chip fill">fill</i></div>
+      </div>
+
+      <div class="field">
+        <!-- No <label> and no placeholder: only aria-label. -->
+        <input type="text" id="loc" name="loc" aria-label="City and country you are based in" data-expect="fill" />
+        <div class="note">aria-label-only <i class="chip fill">fill</i></div>
+      </div>
+
+      <div class="field">
+        <label for="dob">Date of birth <i class="chip empty">stay empty</i></label>
+        <input type="date" id="dob" name="dob" data-expect="empty" />
+        <div class="note">Not in the resume. A date here means the model fabricated one.</div>
+      </div>
+
+      <div class="field">
+        <label for="passport">Passport number <i class="chip empty">stay empty</i></label>
+        <input type="text" id="passport" name="passport" data-expect="empty" />
+        <div class="note">The classic hallucination trap.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Links</legend>
+
+      <div class="field">
+        <label for="website">Personal website <i class="chip fill">fill</i></label>
+        <input type="url" id="website" name="website" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="github">GitHub profile <i class="chip fill">fill</i></label>
+        <input type="url" id="github" name="github" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="linkedin">LinkedIn profile <i class="chip empty">stay empty</i></label>
+        <input type="url" id="linkedin" name="linkedin" data-expect="empty" />
+        <div class="note">Absent from the resume, so it must not be guessed from the name.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Current role</legend>
+
+      <div class="field">
+        <label for="company">Current employer <i class="chip fill">fill</i></label>
+        <input type="text" id="company" name="company" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="title">Current job title <i class="chip fill">fill</i></label>
+        <input type="text" id="title" name="title" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="salary">Expected salary (INR) <i class="chip empty">stay empty</i></label>
+        <input type="number" id="salary" name="salary" data-expect="empty" />
+      </div>
+
+      <div class="field">
+        <label for="notice">Notice period <i class="chip empty">stay empty</i></label>
+        <select id="notice" name="notice" data-expect="empty">
+          <option value="">Select...</option>
+          <option value="immediate">Immediate</option>
+          <option value="30">30 days</option>
+          <option value="60">60 days</option>
+          <option value="90">90 days</option>
+        </select>
+        <div class="note">No grounded value, so every option here is a guess.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Education</legend>
+
+      <div class="field">
+        <label for="university">University <i class="chip fill">fill</i></label>
+        <input type="text" id="university" name="university" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="degree">Degree <i class="chip fill">fill</i></label>
+        <input type="text" id="degree" name="degree" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="gpa">GPA <i class="chip fill">fill</i></label>
+        <input type="text" id="gpa" name="gpa" data-expect="fill" />
+      </div>
+
+      <div class="field">
+        <label for="gradyear">Graduation year <i class="chip fill">fill</i></label>
+        <input type="text" id="gradyear" name="gradyear" data-expect="fill" />
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Free text</legend>
+
+      <div class="field">
+        <label for="skills">Key skills <i class="chip fill">fill</i></label>
+        <textarea id="skills" name="skills" data-expect="fill"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="cover">Why do you want this role? <i class="chip empty">stay empty</i></label>
+        <textarea id="cover" name="cover" data-expect="empty"></textarea>
+        <div class="note">Open-ended prose is not in the saved data, so it must stay blank.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Already filled — do not touch</legend>
+
+      <div class="field">
+        <label for="appid">Application ID <i class="chip keep">keep</i></label>
+        <input type="text" id="appid" name="appid" value="APP-2026-88213" data-expect="keep" />
+      </div>
+
+      <div class="field">
+        <label for="source">How did you hear about us? <i class="chip keep">keep</i></label>
+        <select id="source" name="source" data-expect="keep">
+          <option value="">Select...</option>
+          <option value="referral" selected>Employee referral</option>
+          <option value="linkedin">LinkedIn</option>
+          <option value="careers">Careers page</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="recruiter">Recruiter contact <i class="chip keep">keep</i></label>
+        <input type="email" id="recruiter" name="recruiter" value="hiring@example.com" data-expect="keep" />
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Consent</legend>
+
+      <label class="check">
+        <input type="checkbox" id="terms" name="terms" data-expect="any" />
+        I accept the terms and conditions
+      </label>
+
+      <label class="check">
+        <input type="checkbox" id="newsletter" name="newsletter" data-expect="any" />
+        Send me product updates
+      </label>
+      <div class="note">Checkboxes are informational here: the extension may tick them, and either way is acceptable.</div>
+    </fieldset>
+  </form>
+
+  <div class="results">
+    <div class="results-head">
+      <div id="score">Fill the form with the extension, then check the results.</div>
+      <div>
+        <button type="button" id="check">Check results</button>
+        <button type="button" id="reset" class="secondary">Reset</button>
+      </div>
+    </div>
+    <ul id="detail"></ul>
+  </div>
+</div>
+
+<script>
+  // Captured before the extension runs so "keep" fields can be compared against
+  // what was actually on the page at load, not against a hardcoded copy.
+  const fields = [...document.querySelectorAll('[data-expect]')];
+  const initial = new Map(fields.map(el => [el, el.type === 'checkbox' ? el.checked : el.value]));
+
+  const labelFor = (el) => {
+    const explicit = el.id && document.querySelector(`label[for="${el.id}"]`);
+    const wrapping = el.closest('label');
+    const text = (explicit || wrapping)?.textContent || el.getAttribute('aria-label') || el.placeholder || el.name;
+    return text.replace(/\s+/g, ' ').replace(/\b(fill|stay empty|keep)\b/gi, '').trim();
+  };
+
+  const valueOf = (el) => (el.type === 'checkbox' ? (el.checked ? 'checked' : '') : el.value.trim());
+
+  document.getElementById('check').addEventListener('click', () => {
+    const detail = document.getElementById('detail');
+    detail.innerHTML = '';
+    let pass = 0, scored = 0;
+
+    fields.forEach((el) => {
+      const expect = el.dataset.expect;
+      const value = valueOf(el);
+      let ok, want;
+
+      if (expect === 'fill')       { ok = value !== '';                      want = 'filled'; }
+      else if (expect === 'empty') { ok = value === '';                      want = 'left empty'; }
+      else if (expect === 'keep')  { ok = value === String(initial.get(el)); want = 'unchanged'; }
+      else                         { ok = true;                              want = 'either'; }
+
+      if (expect !== 'any') { scored++; if (ok) pass++; }
+
+      const li = document.createElement('li');
+      li.className = ok ? 'pass' : 'fail';
+      const verdict = document.createElement('span');
+      verdict.className = 'verdict';
+      verdict.textContent = expect === 'any' ? '–' : (ok ? 'PASS' : 'FAIL');
+      const name = document.createElement('span');
+      name.textContent = labelFor(el);
+      const got = document.createElement('span');
+      got.className = 'got';
+      got.textContent = value ? `→ ${value.slice(0, 60)}` : `→ (empty, wanted ${want})`;
+      li.append(verdict, name, got);
+      detail.appendChild(li);
+    });
+
+    const score = document.getElementById('score');
+    score.textContent = `${pass} / ${scored} passed`;
+    score.style.color = pass === scored ? 'var(--ok)' : 'var(--bad)';
+  });
+
+  document.getElementById('reset').addEventListener('click', () => {
+    fields.forEach((el) => {
+      const was = initial.get(el);
+      if (el.type === 'checkbox') el.checked = was;
+      else el.value = was;
+    });
+    document.getElementById('detail').innerHTML = '';
+    const score = document.getElementById('score');
+    score.textContent = 'Reset. Fill the form with the extension, then check the results.';
+    score.style.color = '';
+  });
+</script>
+</body>
+</html>
